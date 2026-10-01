@@ -1,7 +1,13 @@
 node_modules
+.next
+out
 build
 dist
 .git
 .trae
 .log
 .figma
+.vscode
+.idea
+*.tsbuildinfo
+next-env.d.ts
