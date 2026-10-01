@@ -4,16 +4,22 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardContent } from '@/components/ui/card'
 import { RequestForm } from './RequestForm'
 import { ArrowLeft, Sparkles } from 'lucide-react'
-import { getWaitlistEntry } from '@/lib/services/leads.service'
+import {
+  getWaitlistEntry,
+  getAvailableLeadCountBreakdown,
+} from '@/lib/services/leads.service'
 import type { WaitlistEntry } from '@/types'
 
 export const metadata = { title: 'Lead anfordern' }
 
 export default async function RequestLeadPage() {
   const user = await requireSeller()
-  const wallet = await getUserWallet(user.id)
+  const [wallet, waitlistEntry, availableBreakdown] = await Promise.all([
+    getUserWallet(user.id),
+    getWaitlistEntry(user.id),
+    getAvailableLeadCountBreakdown(),
+  ])
   const balance = wallet?.balance ?? 0
-  const waitlistEntry = await getWaitlistEntry(user.id)
 
   return (
     <div className="space-y-8">
@@ -36,7 +42,11 @@ export default async function RequestLeadPage() {
       />
       <Card className="border-slate-200 bg-slate-50/40 shadow-sm">
         <CardContent className="p-6 sm:p-10">
-          <RequestForm balance={balance} waitlistEntry={waitlistEntry} />
+          <RequestForm
+            balance={balance}
+            waitlistEntry={waitlistEntry}
+            initialAvailable={availableBreakdown}
+          />
         </CardContent>
       </Card>
     </div>

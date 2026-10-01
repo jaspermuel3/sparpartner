@@ -33,7 +33,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Plus, UserPlus, Coins, KeyRound, Ban, CheckCircle2, Users, Palette, Pencil } from 'lucide-react'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
+import { Plus, UserPlus, Coins, KeyRound, Ban, CheckCircle2, Users, Palette, Pencil, ShieldCheck } from 'lucide-react'
 
 /* -------- Create User -------- */
 export function CreateSellerDialog({ teams }: { teams?: any[] }) {
@@ -152,23 +158,30 @@ export function TokenDialog({
   )
   useActionFeedback(state)
   const add = mode === 'add'
+  const toneCls = add
+    ? 'hover:bg-emerald-50 hover:border-emerald-200 text-emerald-700'
+    : 'hover:bg-red-50 hover:border-red-200 text-red-700'
+  const Icon = add ? Plus : Ban
+  const tip = add ? 'Tokens gutschreiben' : 'Tokens abziehen'
   return (
     <Dialog>
-      <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={
-            'h-9 px-3 border-slate-200 shadow-sm hover:shadow transition-all ' +
-            (add
-              ? 'text-emerald-700 hover:bg-emerald-50 hover:border-emerald-200'
-              : 'text-red-700 hover:bg-red-50 hover:border-red-200')
-          }
-        >
-          <Coins className={'h-4 w-4 mr-1.5'} />
-          <span className="text-sm font-medium">{add ? '+ Tokens' : '− Tokens'}</span>
-        </Button>
-      </DialogTrigger>
+      <Tooltip delayDuration={300}>
+        <TooltipTrigger asChild>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn('h-9 w-9 !p-0 border-slate-200 shadow-sm hover:shadow transition-all', toneCls)}
+              title={tip}
+            >
+              <Icon className="h-4 w-4" />
+            </Button>
+          </DialogTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>
+          <span className="text-[11px] font-medium">{tip}</span>
+        </TooltipContent>
+      </Tooltip>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
@@ -214,25 +227,32 @@ export function ToggleActiveButton({ seller }: { seller: any }) {
     null,
   )
   useActionFeedback(state)
-
+  const active = !!seller.is_active
+  const tip = active ? 'Benutzer deaktivieren' : 'Benutzer aktivieren'
   return (
     <form action={formAction} className="m-0">
       <input type="hidden" name="userId" value={seller.id} />
-      <input type="hidden" name="active" value={seller.is_active ? 'false' : 'true'} />
-      <SubmitButton
-        variant="outline"
-        size="sm"
-        className={
-          'h-9 px-3 border-slate-200 shadow-sm hover:shadow transition-all ' +
-          (seller.is_active
-            ? 'text-red-700 hover:bg-red-50 hover:border-red-200'
-            : 'text-emerald-700 hover:bg-emerald-50 hover:border-emerald-200')
-        }
-        pendingLabel="…"
-      >
-        {seller.is_active ? <Ban className="h-4 w-4 mr-1.5" /> : <CheckCircle2 className="h-4 w-4 mr-1.5" />}
-        <span className="text-sm font-medium">{seller.is_active ? 'Deaktivieren' : 'Aktivieren'}</span>
-      </SubmitButton>
+      <input type="hidden" name="active" value={active ? 'false' : 'true'} />
+      <Tooltip delayDuration={300}>
+        <TooltipTrigger asChild>
+          <SubmitButton
+            variant="outline"
+            size="sm"
+            className={cn(
+              'h-9 w-9 !p-0 border-slate-200 shadow-sm hover:shadow transition-all',
+              active
+                ? 'text-red-700 hover:bg-red-50 hover:border-red-200'
+                : 'text-emerald-700 hover:bg-emerald-50 hover:border-emerald-200',
+            )}
+            pendingLabel="…"
+          >
+            {active ? <Ban className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+          </SubmitButton>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>
+          <span className="text-[11px] font-medium">{tip}</span>
+        </TooltipContent>
+      </Tooltip>
     </form>
   )
 }
@@ -246,16 +266,23 @@ export function EditSellerDialog({ seller, teams }: { seller: any; teams?: any[]
   useActionFeedback(state)
   return (
     <Dialog>
-      <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 px-3 border-slate-200 text-slate-700 shadow-sm hover:shadow hover:bg-slate-50 hover:border-slate-300 transition-all"
-        >
-          <Pencil className="h-4 w-4 mr-1.5" />
-          <span className="text-sm font-medium">Bearbeiten</span>
-        </Button>
-      </DialogTrigger>
+      <Tooltip delayDuration={300}>
+        <TooltipTrigger asChild>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 !p-0 border-slate-200 text-slate-700 shadow-sm hover:shadow hover:bg-slate-50 hover:border-slate-300 transition-all"
+              title="Benutzer bearbeiten"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          </DialogTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>
+          <span className="text-[11px] font-medium">Benutzer bearbeiten</span>
+        </TooltipContent>
+      </Tooltip>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Benutzer bearbeiten</DialogTitle>
@@ -328,16 +355,23 @@ export function ResetPwdDialog({ seller }: { seller: any }) {
   useActionFeedback(state)
   return (
     <Dialog>
-      <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 px-3 border-slate-200 text-slate-700 shadow-sm hover:shadow hover:bg-slate-50 hover:border-slate-300 transition-all"
-        >
-          <KeyRound className="h-4 w-4 mr-1.5" />
-          <span className="text-sm font-medium">Passwort</span>
-        </Button>
-      </DialogTrigger>
+      <Tooltip delayDuration={300}>
+        <TooltipTrigger asChild>
+          <DialogTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 w-9 !p-0 border-slate-200 text-slate-700 shadow-sm hover:shadow hover:bg-amber-50 hover:border-amber-200 hover:text-amber-700 transition-all"
+              title="Passwort zurücksetzen"
+            >
+              <KeyRound className="h-4 w-4" />
+            </Button>
+          </DialogTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6}>
+          <span className="text-[11px] font-medium">Passwort zurücksetzen</span>
+        </TooltipContent>
+      </Tooltip>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Passwort zurücksetzen</DialogTitle>

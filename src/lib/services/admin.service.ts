@@ -379,11 +379,15 @@ export async function adminResetLead(leadId: string, byUserId: string, refund: b
 
 export async function getSellerPerformance(sellerId: string) {
   const admin = createAdminClient()
-  const [leads, closed, lost, contactAttempts] = await Promise.all([
+  const [leads, closed, lost, contactAttempts, contactedQ] = await Promise.all([
     admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', sellerId),
     admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', sellerId).eq('status', 'closed'),
     admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', sellerId).in('status', ['no_interest', 'wrong_data', 'canceled']),
     admin.from('contact_attempts').select('id', { count: 'exact', head: true }).eq('user_id', sellerId),
+    admin
+      .from('contact_attempts')
+      .select('lead_id', { count: 'exact', head: true })
+      .eq('user_id', sellerId),
   ])
   const c = closed.count ?? 0
   const l = lost.count ?? 0
@@ -397,6 +401,7 @@ export async function getSellerPerformance(sellerId: string) {
     abschluss_quote: quote,
     kontaktversuche: contactAttempts.count ?? 0,
     durchschnitt_kontakte: avg,
+    kontaktierte_leads: Math.min(total, contactedQ.count ?? 0),
   }
 }
 

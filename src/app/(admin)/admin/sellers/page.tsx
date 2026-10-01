@@ -215,7 +215,7 @@ export default async function AdminSellersPage({
                 <Input
                   id="q"
                   name="q"
-                  value={searchParams.q ?? ''}
+                  defaultValue={searchParams.q ?? ''}
                   placeholder="z. B. Max Mustermann oder max@unternehmen.de"
                   className="pl-9"
                 />
@@ -291,7 +291,7 @@ export default async function AdminSellersPage({
                   <SortableHead label="Abschlüsse" align="right" hidden="lg" sortKey="abschlüsse" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Quote" align="right" hidden="xl" sortKey="quote" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Ø Kontakte" align="right" hidden="xl" sortKey="kontakte" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
-                  <TableHead className="text-right w-[260px]">Aktionen</TableHead>
+                  <TableHead className="text-right w-[170px]">Aktionen</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -516,7 +516,7 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
       <TableCell className="hidden xl:table-cell text-right text-sm text-slate-700 tabular-nums">
         {(p.durchschnitt_kontakte ?? 0).toFixed(1)}
       </TableCell>
-      <TableCell className="text-right w-[260px]">
+      <TableCell className="text-right w-[170px]">
         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
           <TokenDialog seller={seller} mode="add" />
           <TokenDialog seller={seller} mode="subtract" />

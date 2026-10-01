@@ -2,14 +2,6 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -26,7 +18,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
 import {
   ChevronLeft,
   ChevronRight,
@@ -39,21 +30,25 @@ import {
   Check,
   X,
   Pencil,
+  Zap,
+  CalendarDays,
 } from 'lucide-react'
 import { LeadAvatar } from '@/components/ui-custom/LeadAvatar'
 import { LeadStatusBadge } from '@/components/ui-custom/StatusBadges'
 import {
-  LEAD_STATUS_LABELS,
   PRODUCT_LABELS,
   formatDate,
+  formatDateShort,
+  formatTime,
+  formatRelative,
   formatPhone,
   formatDaysSince,
   leadAgeClass,
   phoneHref,
+  LEAD_STATUS_CLASSES,
 } from '@/lib/constants'
 import { buildQueryString, cn } from '@/lib/utils'
 import type { Lead, LeadStatus, ProductType } from '@/types'
-import { Suspense } from 'react'
 import { SkeletonShimmer } from '@/components/ui-custom/SkeletonShimmer'
 import { useRouter } from 'next/navigation'
 import { useFormState } from 'react-dom'
@@ -64,19 +59,33 @@ type LeadLike = Lead & { email?: string | null; phone?: string | null }
 
 type SearchParamsLike = Record<string, string | undefined>
 
-const STORAGE_KEY_COLUMNS = 'crm:my-leads:columns:v1'
 const STORAGE_KEY_PAGESIZE = 'crm:my-leads:pagesize:v1'
 
-const ALL_COLUMNS: Array<{ id: string; label: string; defaultVisible: boolean; minWidth?: string }> = [
-  { id: 'name', label: 'Name / Kontakt', defaultVisible: true },
-  { id: 'product', label: 'Produkt', defaultVisible: true },
-  { id: 'status', label: 'Status', defaultVisible: true },
-  { id: 'age', label: 'Alter', defaultVisible: true },
-  { id: 'assigned', label: 'Zugewiesen am', defaultVisible: true },
-  { id: 'contact', label: 'Letzter Kontakt', defaultVisible: false },
-]
-
 const PAGE_SIZES = [10, 25, 50, 100]
+
+const STATUS_ACCENT: Record<LeadStatus, string> = {
+  new: 'bg-slate-400',
+  assigned: 'bg-blue-500',
+  contacted: 'bg-amber-500',
+  callback: 'bg-orange-500',
+  offer: 'bg-indigo-500',
+  closed: 'bg-emerald-500',
+  no_interest: 'bg-red-500',
+  wrong_data: 'bg-red-500',
+  canceled: 'bg-slate-500',
+}
+
+const STATUS_SOFT_BG: Record<LeadStatus, string> = {
+  new: 'bg-slate-50',
+  assigned: 'bg-blue-50/40',
+  contacted: 'bg-amber-50/40',
+  callback: 'bg-orange-50/40',
+  offer: 'bg-indigo-50/40',
+  closed: 'bg-emerald-50/40',
+  no_interest: 'bg-red-50/30',
+  wrong_data: 'bg-red-50/30',
+  canceled: 'bg-slate-50',
+}
 
 export function LeadTableView({
   data,
@@ -92,20 +101,6 @@ export function LeadTableView({
   searchParams: SearchParamsLike
 }) {
   const router = useRouter()
-  const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>(() => {
-    if (typeof window === 'undefined') {
-      return Object.fromEntries(ALL_COLUMNS.map((c) => [c.id, c.defaultVisible]))
-    }
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY_COLUMNS)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        const base = Object.fromEntries(ALL_COLUMNS.map((c) => [c.id, c.defaultVisible]))
-        return { ...base, ...parsed }
-      }
-    } catch {}
-    return Object.fromEntries(ALL_COLUMNS.map((c) => [c.id, c.defaultVisible]))
-  })
 
   const [pageSize, setPageSize] = useState<number>(() => {
     if (initialPageSize && PAGE_SIZES.includes(initialPageSize)) return initialPageSize
@@ -122,12 +117,6 @@ export function LeadTableView({
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_KEY_COLUMNS, JSON.stringify(visibleCols))
-    } catch {}
-  }, [visibleCols])
-
-  useEffect(() => {
-    try {
       window.localStorage.setItem(STORAGE_KEY_PAGESIZE, String(pageSize))
     } catch {}
   }, [pageSize])
@@ -135,7 +124,6 @@ export function LeadTableView({
   const totalPages = Math.max(1, Math.ceil(count / pageSize))
   const effectivePage = Math.min(page, totalPages)
 
-  // Einfache lokale Duplikat-Erkennung: gleiche Telefonnummer oder gleiche E-Mail
   const duplicates = useMemo(() => {
     const byPhone = new Map<string, string[]>()
     const byEmail = new Map<string, string[]>()
@@ -163,8 +151,6 @@ export function LeadTableView({
     return dupIds
   }, [data])
 
-  const colVisible = (id: string) => visibleCols[id] !== false
-
   function goToPage(p: number) {
     const targetPage = Math.max(1, Math.min(totalPages, p))
     const qs = buildQueryString(searchParams, { page: targetPage === 1 ? undefined : String(targetPage), pageSize: String(pageSize) })
@@ -179,24 +165,20 @@ export function LeadTableView({
     router.push(`/my-leads${qs}`)
   }
 
-  function toggleColumn(id: string) {
-    setVisibleCols((prev) => ({ ...prev, [id]: !(prev[id] !== false) }))
-  }
-
   return (
-    <div className="space-y-0">
-      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5 sm:px-5">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-2.5 sm:px-5 shadow-sm">
         <div className="text-xs text-slate-500 tabular-nums">
-          {count} Eintrag{count === 1 ? '' : 'e'}
+          <span className="font-medium text-slate-700">{count}</span> Eintrag{count === 1 ? '' : 'e'}
           {duplicates.size > 0 ? (
-            <span className="ml-2 inline-flex items-center gap-1 text-amber-600">
+            <span className="ml-2.5 inline-flex items-center gap-1 text-amber-600">
               <AlertCircle className="h-3 w-3" /> {duplicates.size} möglicher Duplikat{duplicates.size === 1 ? '' : 'e'}
             </span>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 text-xs text-slate-500">
-            <span>Pro Seite:</span>
+            <span className="hidden sm:inline">Pro Seite:</span>
             <Select value={String(pageSize)} onValueChange={onChangePageSize}>
               <SelectTrigger className="h-8 w-[72px] border-slate-200 bg-white text-xs">
                 <SelectValue />
@@ -208,207 +190,237 @@ export function LeadTableView({
               </SelectContent>
             </Select>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs text-slate-600 hover:text-slate-900">
-                <Settings2 className="h-3.5 w-3.5" />
-                Spalten
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[200px]">
-              <DropdownMenuLabel className="text-[11px] uppercase tracking-widest text-slate-400">Sichtbare Spalten</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {ALL_COLUMNS.map((c) => (
-                <DropdownMenuCheckboxItem
-                  key={c.id}
-                  checked={colVisible(c.id)}
-                  onCheckedChange={() => toggleColumn(c.id)}
-                  className="text-xs"
-                >
-                  {c.label}
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <Table className="crm-table">
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[48px] px-3 sm:px-4"></TableHead>
-              {colVisible('name') && <TableHead>Name / Kontakt</TableHead>}
-              {colVisible('product') && <TableHead className="hidden md:table-cell">Produkt</TableHead>}
-              {colVisible('status') && <TableHead>Status</TableHead>}
-              {colVisible('age') && <TableHead className="w-[96px]">Alter</TableHead>}
-              {colVisible('assigned') && <TableHead className="hidden lg:table-cell">Zugewiesen am</TableHead>}
-              {colVisible('contact') && <TableHead className="hidden xl:table-cell">Letzter Kontakt</TableHead>}
-              <TableHead className="w-[36px] px-3 sm:px-4"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.length === 0 && (
-              <TableRow className="stagger-item" style={{ animationDelay: '80ms' }}>
-                <TableCell colSpan={ALL_COLUMNS.filter((c) => colVisible(c.id)).length + 2}>
-                  <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center">
-                    <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400">
-                      <Layers className="h-4 w-4" />
-                    </div>
-                    <div className="text-sm font-medium text-slate-800">Keine passenden Leads</div>
-                    <div className="mt-1 text-xs text-slate-500 max-w-xs">
-                      Passe deine Filter an oder entferne die Suche.
-                    </div>
-                  </div>
-                </TableCell>
-              </TableRow>
-            )}
-            {data.map((lead, idx) => {
-              const leadAny = lead as any
-              const ageDays = formatDaysSince(leadAny.assigned_at ?? lead.created_at)
-              const isDup = duplicates.has(lead.id)
-              const staggerDelay = Math.min(600, 60 + idx * 45)
-              return (
-                <TableRow
-                  key={lead.id}
-                  className="group relative crm-row-hover stagger-item"
-                  style={{ animationDelay: `${staggerDelay}ms` }}
-                >
-                  <TableCell className="px-3 sm:px-4 py-3 align-top">
-                    <div className="relative">
-                      <LeadAvatar firstName={lead.first_name} lastName={lead.last_name} size="md" className="h-9 w-9" />
-                      {isDup ? (
-                        <span
-                          title="Mögliche Dublette"
-                          className="absolute -right-1 -bottom-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-white bg-amber-500 text-white shadow-sm"
-                        >
-                          <AlertCircle className="h-2.5 w-2.5" />
-                        </span>
-                      ) : null}
-                    </div>
-                  </TableCell>
-                  {colVisible('name') && (
-                    <TableCell className="py-3 align-top">
-                      <div className="block min-w-0 pr-4">
-                        <div className="flex items-center gap-2">
-                          <InlineEditCell
-                            leadId={lead.id}
-                            field="name"
-                            value={`${lead.first_name ?? ''} ${lead.last_name ?? ''}`.trim()}
-                            splitFields={['first_name', 'last_name']}
-                            trigger={
-                              <div className="font-medium text-slate-900 group-hover:text-slate-950 truncate cursor-text">
-                                {lead.first_name} {lead.last_name}
-                              </div>
-                            }
-                          />
-                          {isDup ? (
-                            <span className="inline-flex items-center gap-0.5 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                              <AlertCircle className="h-2.5 w-2.5" />
-                              Dublette
-                            </span>
-                          ) : null}
-                        </div>
-                        {lead.email ? (
-                          <div className="mt-0.5 max-w-[280px]">
-                            <InlineEditCell
-                              leadId={lead.id}
-                              field="email"
-                              value={lead.email ?? ''}
-                              inputType="email"
-                              trigger={
-                                <div className="truncate text-xs text-slate-500 cursor-text">{lead.email}</div>
-                              }
-                            />
-                          </div>
-                        ) : null}
-                        {lead.phone ? (
-                          <div className="mt-0.5">
-                            <InlineEditCell
-                              leadId={lead.id}
-                              field="phone"
-                              value={lead.phone ?? ''}
-                              inputType="tel"
-                              renderValue={(v) => formatPhone(v)}
-                              trigger={
-                                <div className="text-xs text-slate-500 tabular-nums cursor-text">{formatPhone(lead.phone)}</div>
-                              }
-                            />
-                          </div>
+      {data.length === 0 && (
+        <div className="stagger-item" style={{ animationDelay: '80ms' }}>
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 px-6 py-14 text-center">
+            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-400 shadow-sm">
+              <Layers className="h-5 w-5" />
+            </div>
+            <div className="text-sm font-semibold text-slate-800">Keine passenden Leads</div>
+            <div className="mt-1 text-xs text-slate-500 max-w-xs">
+              Passe deine Filter an oder entferne die Suche.
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {data.map((lead, idx) => {
+          const leadAny = lead as any
+          const sinceRaw = leadAny.assigned_at ?? lead.created_at
+          const ageDays = formatDaysSince(sinceRaw)
+          const relativeSince = formatRelative(sinceRaw)
+          const exactTime = formatTime(sinceRaw)
+          const exactDate = formatDateShort(sinceRaw)
+          const lastContactRelative = formatRelative(leadAny.last_contact_at)
+          const lastContactExact = formatTime(leadAny.last_contact_at)
+          const isDup = duplicates.has(lead.id)
+          const staggerDelay = Math.min(600, 40 + idx * 40)
+          const statusKey = lead.status as LeadStatus
+          const detailUrl = `/leads/${lead.id}`
+          return (
+            <div
+              key={lead.id}
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('button, a, [role=combobox], input, textarea, [data-no-nav]')) return
+                router.push(detailUrl)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  if ((e.target as HTMLElement).closest('button, a, input, textarea, [role=combobox]')) return
+                  e.preventDefault()
+                  router.push(detailUrl)
+                }
+              }}
+              role="link"
+              tabIndex={0}
+              className={cn(
+                'group stagger-item relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2',
+                'transition-all duration-200 ease-out',
+                'hover:-translate-y-0.5 hover:shadow-md hover:border-slate-300',
+                STATUS_SOFT_BG[statusKey] ?? 'bg-white',
+              )}
+              style={{ animationDelay: `${staggerDelay}ms` }}
+            >
+              <div className={cn('absolute inset-y-0 left-0 w-1', STATUS_ACCENT[statusKey] ?? 'bg-slate-300')} />
+
+              <div className="flex gap-3 p-3.5 sm:p-4 pl-4">
+                <div className="relative shrink-0">
+                  <Link href={detailUrl} tabIndex={-1} onClick={(e) => e.stopPropagation()} className="block" aria-hidden="true">
+                    <LeadAvatar firstName={lead.first_name} lastName={lead.last_name} size="md" className="h-11 w-11 ring-2 ring-white shadow-sm" />
+                  </Link>
+                  {isDup ? (
+                    <span
+                      title="Mögliche Dublette"
+                      className="absolute -right-0.5 -bottom-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full border-2 border-white bg-amber-500 text-white shadow-sm"
+                    >
+                      <AlertCircle className="h-2.5 w-2.5" />
+                    </span>
+                  ) : null}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <InlineEditCell
+                          leadId={lead.id}
+                          field="name"
+                          value={`${lead.first_name ?? ''} ${lead.last_name ?? ''}`.trim()}
+                          splitFields={['first_name', 'last_name']}
+                          trigger={
+                            <Link href={detailUrl} onClick={(e) => e.stopPropagation()} className="block truncate text-sm font-semibold text-slate-900 hover:underline decoration-slate-300 underline-offset-2">
+                              {lead.first_name} {lead.last_name}
+                            </Link>
+                          }
+                        />
+                        {isDup ? (
+                          <span
+                            className="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700"
+                            onClick={(e) => e.preventDefault()}
+                          >
+                            <AlertCircle className="h-2.5 w-2.5" />
+                            Dublette
+                          </span>
                         ) : null}
                       </div>
-                    </TableCell>
-                  )}
-                  {colVisible('product') && (
-                    <TableCell className="hidden md:table-cell py-3 align-top text-sm text-slate-600">
-                      {PRODUCT_LABELS[lead.product as ProductType] ?? '—'}
-                    </TableCell>
-                  )}
-                  {colVisible('status') && (
-                    <TableCell className="py-3 align-top">
-                      <LeadStatusBadge status={lead.status as LeadStatus} showPop={false} />
-                    </TableCell>
-                  )}
-                  {colVisible('age') && (
-                    <TableCell className={`py-3 align-top text-xs font-medium tabular-nums ${leadAgeClass(ageDays)}`}>
-                      {ageDays === null ? '—' : ageDays === 0 ? 'Heute' : `${ageDays} T.`}
-                    </TableCell>
-                  )}
-                  {colVisible('assigned') && (
-                    <TableCell className="hidden lg:table-cell py-3 align-top text-xs text-slate-500 tabular-nums">
-                      {formatDate(leadAny.assigned_at ?? lead.created_at)}
-                    </TableCell>
-                  )}
-                  {colVisible('contact') && (
-                    <TableCell className="hidden xl:table-cell py-3 align-top text-xs text-slate-500 tabular-nums">
-                      {leadAny.last_contact_at ? formatDate(leadAny.last_contact_at) : '—'}
-                    </TableCell>
-                  )}
-                  <TableCell className="px-3 sm:px-4 py-3 align-top">
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-end gap-1">
-                      {lead.phone ? (
-                        <a
-                          href={phoneHref(lead.phone)}
-                          title="Anrufen"
-                          aria-label="Anrufen"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Phone className="h-3.5 w-3.5" />
-                        </a>
-                      ) : null}
-                      {lead.email ? (
-                        <a
-                          href={`mailto:${lead.email}`}
-                          title="E-Mail"
-                          aria-label="E-Mail"
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Mail className="h-3.5 w-3.5" />
-                        </a>
-                      ) : null}
-                      <Link
-                        href={`/leads/${lead.id}`}
-                        title="Öffnen"
-                        aria-label="Lead öffnen"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                      >
-                        <ArrowUpRight className="h-3.5 w-3.5" />
-                      </Link>
+
+                      <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                        <LeadStatusBadge status={statusKey} showPop={false} />
+                        <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 shadow-sm">
+                          <Zap className="h-2.5 w-2.5 text-slate-400" />
+                          {PRODUCT_LABELS[lead.product as ProductType] ?? '—'}
+                        </span>
+                      </div>
                     </div>
-                  </TableCell>
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
+
+                    <div
+                      className={cn(
+                        'shrink-0 text-right w-[92px]',
+                        ageDays !== null && leadAgeClass(ageDays),
+                      )}
+                    >
+                      <div className="text-[10.5px] font-semibold tabular-nums leading-none">
+                        {sinceRaw ? relativeSince : '—'}
+                      </div>
+                      <div className="mt-1 inline-flex items-center gap-1 text-[9.5px] text-slate-400 tabular-nums whitespace-nowrap">
+                        <CalendarDays className="h-2.5 w-2.5" />
+                        {exactDate} · {exactTime}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2.5 space-y-1">
+                    {lead.phone ? (
+                      <div className="flex items-center gap-1.5">
+                        <Phone className="h-3 w-3 shrink-0 text-slate-400" />
+                        <InlineEditCell
+                          leadId={lead.id}
+                          field="phone"
+                          value={lead.phone ?? ''}
+                          inputType="tel"
+                          renderValue={(v) => formatPhone(v)}
+                          trigger={
+                            <div className="truncate text-xs text-slate-600 tabular-nums cursor-pointer">
+                              {formatPhone(lead.phone)}
+                            </div>
+                          }
+                        />
+                      </div>
+                    ) : null}
+                    {lead.email ? (
+                      <div className="flex items-center gap-1.5">
+                        <Mail className="h-3 w-3 shrink-0 text-slate-400" />
+                        <InlineEditCell
+                          leadId={lead.id}
+                          field="email"
+                          value={lead.email ?? ''}
+                          inputType="email"
+                          trigger={
+                            <div className="truncate text-xs text-slate-600 cursor-pointer">
+                              {lead.email}
+                            </div>
+                          }
+                        />
+                      </div>
+                    ) : null}
+                    {leadAny.last_contact_at ? (
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <span className="h-3 w-3 shrink-0 rounded-full bg-emerald-400/60" />
+                        <span className="text-[10.5px] text-slate-500 tabular-nums">
+                          Letzter Kontakt: {lastContactRelative} · {lastContactExact}
+                        </span>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className={cn(
+                  'flex items-center justify-between gap-2 border-t border-slate-100/80 bg-white/60 px-3.5 sm:px-4 pl-4 py-2',
+                  'opacity-80 group-hover:opacity-100 transition-opacity',
+                )}
+              >
+                <div className="flex items-center gap-1">
+                  {lead.phone ? (
+                    <button
+                      type="button"
+                      title="Anrufen"
+                      aria-label="Anrufen"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        window.location.href = phoneHref(lead.phone)
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 transition-all"
+                    >
+                      <Phone className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                  {lead.email ? (
+                    <button
+                      type="button"
+                      title="E-Mail"
+                      aria-label="E-Mail"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        e.preventDefault()
+                        window.location.href = `mailto:${lead.email}`
+                      }}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all"
+                    >
+                      <Mail className="h-3.5 w-3.5" />
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <span className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mr-1">
+                    Öffnen
+                  </span>
+                  <Link
+                    href={detailUrl}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="Lead öffnen"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-slate-900 text-white shadow-sm hover:bg-slate-800 hover:scale-105 transition-all"
+                  >
+                    <ArrowUpRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 sm:px-5">
+        <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3 sm:px-5 shadow-sm">
           <div className="text-xs text-slate-500 tabular-nums">
-            Seite {effectivePage} von {totalPages}
+            Seite <span className="font-medium text-slate-700">{effectivePage}</span> von {totalPages}
           </div>
           <div className="flex items-center gap-1">
             {effectivePage > 1 ? (
@@ -529,13 +541,10 @@ function InlineEditCell({
 
   function handleSave() {
     if (!validate(draft)) return
-    const fd = new FormData()
-    fd.append('leadId', leadId)
     if (splitFields) {
       const parts = draft.trim().split(/\s+/)
       const f = parts[0] ?? ''
       const l = parts.slice(1).join(' ')
-      // Zweistufig: two individual calls
       const fd1 = new FormData()
       fd1.append('leadId', leadId)
       fd1.append('field', splitFields[0])
@@ -553,6 +562,8 @@ function InlineEditCell({
           setTimeout(() => setEditing(false), 180)
         })
     } else {
+      const fd = new FormData()
+      fd.append('leadId', leadId)
       fd.append('field', field)
       fd.append('value', draft)
       formAction(fd)
@@ -564,12 +575,13 @@ function InlineEditCell({
   if (!editing) {
     return (
       <div
+        className="group/inline-edit flex-1 min-w-0"
+        onClick={(e) => e.preventDefault()}
         onDoubleClick={() => setEditing(true)}
-        className="group/inline-edit"
         title="Doppelklick zum Bearbeiten"
       >
-        <div className="flex items-center gap-1">
-          {trigger}
+        <div className="flex items-center gap-1 min-w-0">
+          <div className="min-w-0 flex-1">{trigger}</div>
           <button
             type="button"
             aria-label="Bearbeiten"
@@ -578,7 +590,7 @@ function InlineEditCell({
               e.stopPropagation()
               setEditing(true)
             }}
-            className="opacity-0 group-hover/inline-edit:opacity-100 transition-opacity inline-flex h-6 w-6 items-center justify-center rounded-md border border-transparent text-slate-400 hover:border-slate-200 hover:bg-white hover:text-slate-700"
+            className="opacity-0 group-hover/inline-edit:opacity-100 transition-opacity shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-md border border-transparent text-slate-400 hover:border-slate-200 hover:bg-white hover:text-slate-700"
           >
             <Pencil className="h-3 w-3" />
           </button>
@@ -588,10 +600,11 @@ function InlineEditCell({
   }
 
   return (
-    <div ref={wrapperRef} className="relative w-full max-w-[320px] fade-slide-up">
+    <div ref={wrapperRef} className="relative w-full z-20 fade-slide-up" onClick={(e) => e.preventDefault()}>
       <form
         onSubmit={(e) => {
           e.preventDefault()
+          e.stopPropagation()
           handleSave()
         }}
         className="flex items-center gap-1"
@@ -618,9 +631,7 @@ function InlineEditCell({
           type="submit"
           aria-label="Speichern"
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-          onClick={(e) => {
-            e.stopPropagation()
-          }}
+          onClick={(e) => e.stopPropagation()}
         >
           <Check className="h-3.5 w-3.5" />
         </button>
@@ -647,23 +658,46 @@ function InlineEditCell({
 
 export function LeadTableSkeleton() {
   return (
-    <div className="space-y-0">
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-2.5 sm:px-5">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-2.5 sm:px-5 shadow-sm">
         <SkeletonShimmer className="h-3 w-28" />
-        <div className="flex items-center gap-2">
-          <SkeletonShimmer className="h-8 w-20" />
-          <SkeletonShimmer className="h-8 w-20" />
-        </div>
+        <SkeletonShimmer className="h-8 w-20" />
       </div>
-      <div className="p-4 sm:p-5 space-y-3">
-        {Array.from({ length: 10 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <SkeletonShimmer className="h-9 w-9 rounded-full" />
-            <SkeletonShimmer className="h-9 w-52" />
-            <SkeletonShimmer className="h-9 w-24 hidden md:block" />
-            <SkeletonShimmer className="h-9 w-24" />
-            <SkeletonShimmer className="h-9 w-16" />
-            <SkeletonShimmer className="h-9 w-32 hidden lg:block" />
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: 9 }).map((_, i) => (
+          <div key={i} className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="absolute inset-y-0 left-0 w-1 bg-slate-200" />
+            <div className="flex gap-3 p-3.5 sm:p-4 pl-4">
+              <SkeletonShimmer className="h-11 w-11 shrink-0 rounded-full" />
+              <div className="min-w-0 flex-1 space-y-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1.5 flex-1">
+                    <SkeletonShimmer className="h-4 w-3/4" />
+                    <div className="flex items-center gap-1.5">
+                      <SkeletonShimmer className="h-5 w-16 rounded-md" />
+                      <SkeletonShimmer className="h-5 w-14 rounded-md" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5 text-right">
+                    <SkeletonShimmer className="h-3 w-10 ml-auto" />
+                    <SkeletonShimmer className="h-2.5 w-16 ml-auto" />
+                  </div>
+                </div>
+                <div className="space-y-1.5 pt-0.5">
+                  <SkeletonShimmer className="h-3 w-40" />
+                  <SkeletonShimmer className="h-3 w-44" />
+                </div>
+              </div>
+            </div>
+            <div className="border-t border-slate-100/80 bg-white/60 px-4 py-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1">
+                  <SkeletonShimmer className="h-8 w-8 rounded-lg" />
+                  <SkeletonShimmer className="h-8 w-8 rounded-lg" />
+                </div>
+                <SkeletonShimmer className="h-8 w-20 rounded-lg" />
+              </div>
+            </div>
           </div>
         ))}
       </div>

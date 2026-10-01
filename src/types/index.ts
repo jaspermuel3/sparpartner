@@ -246,3 +246,27 @@ export interface TimeHeatmapCell {
   attempts: number
   reached: number
 }
+
+export type NotificationType =
+  | 'lead_assigned'
+  | 'lead_available'
+  | 'token_credit'
+  | 'token_low'
+  | 'callback_due'
+  | 'callback_overdue'
+  | 'status_changed'
+  | 'contact_attempt'
+  | 'admin_alert'
+  | 'info'
+
+export interface Notification {
+  id: string
+  user_id: string
+  type: NotificationType
+  title: string
+  body: string | null
+  link: string | null
+  data: Record<string, unknown> | null
+  read_at: string | null
+  created_at: string
+}

@@ -164,7 +164,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       for (const t of callbackTimersRef.current.values()) window.clearTimeout(t)
       callbackTimersRef.current.clear()
     }
-  }, [disabled, router, pathname, prefs])
+  }, [disabled, router, prefs])
 
   return <>{children}</>
 }

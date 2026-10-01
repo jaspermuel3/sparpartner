@@ -84,6 +84,11 @@ export async function getTokenWallet(userId: string) {
   return data
 }
 
+export async function getWalletBalance(userId: string): Promise<number> {
+  const wallet = await getTokenWallet(userId)
+  return Number((wallet as { balance?: number } | null)?.balance ?? 0)
+}
+
 export async function getTokenTransactions(userId: string, limit = 100) {
   const admin = createAdminClient()
   const { data } = await admin

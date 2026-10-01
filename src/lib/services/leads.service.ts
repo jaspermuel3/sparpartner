@@ -32,14 +32,14 @@ export async function requestLead(userId: string, product?: ProductType | null):
   const leadId = data as string
   const { data: lead } = await admin
     .from('leads')
-    .select('*')
+    .select('id, first_name, last_name, status, assigned_user_id, assigned_at')
     .eq('id', leadId)
     .limit(1)
     .maybeSingle()
 
   if (!lead) throw new Error('NO_LEAD_AVAILABLE')
 
-  return lead as Lead
+  return lead as unknown as Lead
 }
 
 export async function getWaitlistEntry(userId: string): Promise<WaitlistEntry | null> {
@@ -608,4 +608,48 @@ export async function getContactTimeHeatmap(userId: string, days = 56): Promise<
     }
   } catch {}
   return [] as TimeHeatmapCell[]
+}
+
+export async function getAvailableLeadCount(product?: ProductType | null): Promise<number> {
+  const admin = createAdminClient()
+  let query = admin
+    .from('leads')
+    .select('id', { count: 'exact', head: true })
+    .is('assigned_user_id', null)
+    .not('status', 'in', '("canceled","wrong_data","no_interest","closed")')
+
+  if (product && product !== 'beides') {
+    query = query.eq('product', product) as typeof query
+  }
+
+  const { count, error } = await query
+  if (error) throw error
+  return count ?? 0
+}
+
+export async function getAvailableLeadCountBreakdown(): Promise<{
+  total: number
+  strom: number
+  gas: number
+  beides: number
+}> {
+  const admin = createAdminClient()
+  const base = admin
+    .from('leads')
+    .select('id, product', { count: 'exact' })
+    .is('assigned_user_id', null)
+    .not('status', 'in', '("canceled","wrong_data","no_interest","closed")')
+
+  const { data, error } = await base
+  if (error) throw error
+  const rows = (data ?? []) as Array<{ product: string | null }>
+  const strom = rows.filter((r) => r.product === 'strom').length
+  const gas = rows.filter((r) => r.product === 'gas').length
+  const beides = rows.filter((r) => r.product === 'beides').length
+  return {
+    total: rows.length,
+    strom,
+    gas,
+    beides,
+  }
 }

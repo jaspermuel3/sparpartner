@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select'
 import { LEAD_STATUS_LABELS } from '@/lib/constants'
 import type { LeadStatus } from '@/types'
+import { cn } from '@/lib/utils'
 
 type Props = {
   defaultValue?: string
@@ -22,6 +23,7 @@ type Props = {
   className?: string
   placeholder?: string
   labels?: Record<string, string>
+  size?: 'sm' | 'md'
 }
 
 export function StatusFilterSelect({
@@ -34,6 +36,7 @@ export function StatusFilterSelect({
   className,
   placeholder = 'Status',
   labels,
+  size = 'sm',
 }: Props) {
   const router = useRouter()
   const pathname = usePathname()
@@ -56,10 +59,12 @@ export function StatusFilterSelect({
 
   const submitValue = (value === 'all' ? '' : value)
 
+  const sizeClass = size === 'md' ? 'h-10 text-sm' : 'h-9 text-xs'
+
   return (
     <div className="flex items-center">
       <Select value={value} onValueChange={onValueChange} name={effectiveParamName}>
-        <SelectTrigger className={className ?? 'w-[180px]'}>
+        <SelectTrigger className={cn(className ?? 'w-[180px]', sizeClass)}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>

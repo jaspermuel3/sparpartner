@@ -55,7 +55,7 @@ export default async function SellerDashboardPage() {
 
   const [stats, activity, callbacks, worklist, targetsRaw] = await Promise.all([
     getSellerDashboardStats(user.id),
-    getRecentActivity(user.id),
+    getRecentActivity(user.id, 5),
     getUpcomingCallbacks(user.id),
     getWorklist(user.id, 12),
     ensureDefaultTargets(user.id),
@@ -406,7 +406,7 @@ function ActivityList({ attempts, statuses }: { attempts: any[]; statuses: any[]
 
   return (
     <ul className="space-y-2">
-      {merged.slice(0, 15).map((entry, idx) => {
+      {merged.slice(0, 7).map((entry, idx) => {
         const firstName = entry.data.lead?.first_name
         const lastName = entry.data.lead?.last_name
         return (
@@ -489,7 +489,7 @@ function DashboardGridSkeleton() {
 function ActivitySkeleton() {
   return (
     <ul className="space-y-3 pt-2">
-      {Array.from({ length: 5 }).map((_, i) => (
+      {Array.from({ length: 3 }).map((_, i) => (
         <li key={i} className="flex items-start gap-3">
           <Skeleton className="h-8 w-8 rounded-full" />
           <div className="flex-1 space-y-2">

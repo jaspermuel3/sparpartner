@@ -33,6 +33,19 @@ import {
   updateCampaign,
 } from '@/lib/services/admin.service'
 import { logAudit } from '@/lib/audit'
+import {
+  notifyLeadAssigned,
+  notifyTokenCredit,
+  notifyTokenLow,
+  notifyLeadAvailable,
+  notifyCallbackDue,
+} from '@/lib/services/notifications.service'
+import {
+  getNotifications as svcGetNotifications,
+  getUnreadCount as svcUnreadCount,
+  markNotificationRead as svcMarkRead,
+  markAllNotificationsRead as svcMarkAllRead,
+} from '@/lib/services/notifications.service'
 
 const mapError = (err: unknown): { error: string } => {
   let msg: string
@@ -138,6 +151,14 @@ export async function requestLeadAction(formData: FormData) {
     await logAudit(user.id, 'LEAD_ASSIGNED', 'lead', lead.id, { via: 'request_lead', product })
     await logAudit(user.id, 'TOKEN_DEBIT', 'token_wallet', null, { amount: -1, lead_id: lead.id })
     await svcRemoveFromWaitlist(user.id).catch(() => {})
+    try {
+      const leadName = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Unbekannt'
+      await notifyLeadAssigned(user.id, lead.id, leadName)
+      // Prüfe Token-Guthaben nach Abzug
+      const { getWalletBalance } = await import('@/lib/services/tokens.service')
+      const bal = await getWalletBalance(user.id)
+      await notifyTokenLow(user.id, bal)
+    } catch {}
     revalidatePath('/dashboard')
     revalidatePath('/my-leads')
     revalidatePath('/request-lead')
@@ -195,6 +216,17 @@ export async function leaveWaitlistAction() {
     }
   } catch (err) {
     return mapError(err)
+  }
+}
+
+export async function getAvailableLeadCountsAction() {
+  try {
+    await requireSeller()
+    const { getAvailableLeadCountBreakdown } = await import('@/lib/services/leads.service')
+    const breakdown = await getAvailableLeadCountBreakdown()
+    return { ok: true as const, breakdown }
+  } catch (err) {
+    return { ok: false as const, ...mapError(err) }
   }
 }
 
@@ -397,6 +429,12 @@ export async function addTokensToSellerAction(formData: FormData) {
     const reason = String(formData.get('reason'))
     const type = (String(formData.get('type') ?? 'aufladung')) as any
     await svcCreditTokens(userId, amount, reason, adminUser.id, type)
+    try {
+      const { getWalletBalance } = await import('@/lib/services/tokens.service')
+      const bal = await getWalletBalance(userId)
+      await notifyTokenCredit(userId, amount, bal, reason)
+      await notifyTokenLow(userId, bal)
+    } catch {}
     revalidatePath('/admin/sellers')
     revalidatePath('/admin/tokens')
     return { ok: true }
@@ -412,6 +450,11 @@ export async function subtractTokensFromSellerAction(formData: FormData) {
     const amount = Number(formData.get('amount'))
     const reason = String(formData.get('reason'))
     await svcDebitTokens(userId, amount, reason, adminUser.id, 'korrektur_minus')
+    try {
+      const { getWalletBalance } = await import('@/lib/services/tokens.service')
+      const bal = await getWalletBalance(userId)
+      await notifyTokenLow(userId, bal)
+    } catch {}
     revalidatePath('/admin/sellers')
     revalidatePath('/admin/tokens')
     return { ok: true }
@@ -427,6 +470,16 @@ export async function adminAssignLeadAction(formData: FormData) {
     const sellerId = String(formData.get('sellerId'))
     const debitTokens = formData.get('debitTokens') === 'on' || formData.get('debitTokens') === 'true'
     await adminAssignLeadToSeller(leadId, sellerId, adminUser.id, debitTokens)
+    try {
+      const lead = await getLeadWithDetails(leadId, adminUser.id, 'admin')
+      const leadName = lead
+        ? [lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Unbekannt'
+        : 'Unbekannt'
+      await notifyLeadAssigned(sellerId, leadId, leadName)
+      const { getWalletBalance } = await import('@/lib/services/tokens.service')
+      const bal = await getWalletBalance(sellerId)
+      await notifyTokenLow(sellerId, bal)
+    } catch {}
     revalidatePath('/admin/leads')
     revalidatePath('/dashboard')
     return { ok: true }
@@ -787,3 +840,75 @@ export async function updateSellerWithTeamAction(formData: FormData) {
     return { ok: true }
   } catch (err) { return (typeof (mapError as any) === 'function') ? (mapError as any)(err) : { error: String(err) } }
 }
+
+/* =========================
+   Benachrichtigungen
+   ========================= */
+
+export async function getNotificationsAction(onlyUnread = false, limit = 50) {
+  try {
+    const user = await requireUser()
+    const rows = await svcGetNotifications(user.id, { onlyUnread, limit })
+    return { ok: true as const, data: rows }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function getUnreadCountAction() {
+  try {
+    const user = await requireUser()
+    const count = await svcUnreadCount(user.id)
+    return { ok: true as const, count }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function markNotificationReadAction(formData: FormData) {
+  try {
+    const user = await requireUser()
+    const id = String(formData.get('id'))
+    await svcMarkRead(id, user.id)
+    revalidatePath('/dashboard')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function markAllNotificationsReadAction() {
+  try {
+    const user = await requireUser()
+    await svcMarkAllRead(user.id)
+    revalidatePath('/dashboard')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+/* =========================
+   Schnell-Aktionen Rückruf-Erinnerungen
+   ========================= */
+
+export async function getDueCallbackRemindersAction() {
+  try {
+    const user = await requireUser()
+    const admin = createAdminClient()
+    const now = new Date()
+    const in15Min = new Date(now.getTime() + 15 * 60 * 1000)
+    const { data } = await admin
+      .from('callbacks')
+      .select('id, lead_id, callback_at, status, lead:leads(first_name, last_name, phone)')
+      .eq('user_id', user.id)
+      .eq('status', 'offen')
+      .lte('callback_at', in15Min.toISOString())
+      .order('callback_at', { ascending: true })
+      .limit(10)
+    return { ok: true as const, data: (data ?? []) as any[] }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+

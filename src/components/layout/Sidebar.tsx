@@ -25,6 +25,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils'
 import type { UserRole } from '@/types'
 import { UserMenu } from './UserMenu'
+import { NotificationCenter } from '@/components/ui-custom/NotificationCenter'
+import { GlobalNotifiers } from '@/components/ui-custom/GlobalNotifiers'
 
 interface NavItem {
   href: string
@@ -37,6 +39,7 @@ const SALES_NAV: NavItem[] = [
   { href: '/request-lead', label: 'Lead anfordern', icon: UserPlus },
   { href: '/my-leads', label: 'Meine Leads', icon: Layers },
   { href: '/callbacks', label: 'Rückrufe', icon: PhoneForwarded },
+  { href: '/token-history', label: 'Token-Historie', icon: CreditCard },
   { href: '/stats', label: 'Statistiken', icon: BarChart3 },
   { href: '/settings', label: 'Einstellungen', icon: Settings },
 ]
@@ -319,6 +322,7 @@ function MobileHeader({
               {walletBalance} Tokens
             </div>
           )}
+          <NotificationCenter />
           <UserMenu role={role}>
             <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm hover:bg-slate-50 transition-colors cursor-pointer">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-[11px] font-semibold text-white">
@@ -332,6 +336,7 @@ function MobileHeader({
           </UserMenu>
         </div>
       </header>
+      <GlobalNotifiers />
     </>
   )
 }

@@ -50,7 +50,7 @@ import { cn } from '@/lib/utils'
 
 const NOTES_DRAFT_KEY = (id: string) => `crm:leads:${id}:notes-draft:v1`
 
-/* ---------- Status ---------- */
+/* ---------- Status (Kompakt) ---------- */
 export function StatusFormCard({
   initialStatus,
   leadId,
@@ -77,48 +77,50 @@ export function StatusFormCard({
   const [selected, setSelected] = useState<string>(initialStatus)
   useEffect(() => setSelected(initialStatus), [initialStatus])
   return (
-    <>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base font-semibold tracking-tight inline-flex items-center gap-2">
-          <Pencil className="h-4 w-4 text-slate-400" />
-          Status ändern
-        </CardTitle>
-        <CardDescription className="text-xs">Aktualisiere den Bearbeitungsstand</CardDescription>
-      </CardHeader>
-      <div className="px-6 pb-6 pt-0 space-y-3">
-        <form action={formAction} className="space-y-3">
-          <input type="hidden" name="leadId" value={leadId} />
-          <div className="space-y-1.5">
-            <Label htmlFor={`status-${leadId}`}>Neuer Status</Label>
-            <Select name="status" value={selected} onValueChange={setSelected}>
-              <SelectTrigger id={`status-${leadId}`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {statuses.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {LEAD_STATUS_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {state?.error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 fade-slide-up">
-              {state.error}
-            </div>
-          )}
-          <SubmitButton variant="default" size="sm" className="w-full">
-            <Save className="h-4 w-4" />
-            Status speichern
-          </SubmitButton>
-        </form>
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+          <Layers className="h-3.5 w-3.5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-slate-800 tracking-tight leading-tight">Status ändern</div>
+          <div className="text-[11px] text-slate-500 leading-tight">Aktualisiere den Bearbeitungsstand</div>
+        </div>
       </div>
-    </>
+      <form action={formAction} className="space-y-2">
+        <input type="hidden" name="leadId" value={leadId} />
+        <div className="space-y-1">
+          <Label htmlFor={`status-${leadId}`} className="text-[11px] uppercase tracking-widest text-slate-400 font-medium">
+            Neuer Status
+          </Label>
+          <Select name="status" value={selected} onValueChange={setSelected}>
+            <SelectTrigger id={`status-${leadId}`} className="h-9 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {statuses.map((s) => (
+                <SelectItem key={s} value={s} className="text-sm">
+                  {LEAD_STATUS_LABELS[s]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {state?.error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 fade-slide-up">
+            {state.error}
+          </div>
+        )}
+        <SubmitButton variant="default" size="sm" className="w-full h-9 text-xs">
+          <Save className="h-3.5 w-3.5" />
+          Status speichern
+        </SubmitButton>
+      </form>
+    </div>
   )
 }
 
-/* ---------- Notizen ---------- */
+/* ---------- Notizen (Kompakt) ---------- */
 export function NotesFormCard({
   initialNotes,
   leadId,
@@ -137,13 +139,11 @@ export function NotesFormCard({
   const [, setSavedKey] = useState(0)
   const lastSaved = useRef(initialNotes)
 
-  // Sync notes, falls initialNotes von außen ändert
   useEffect(() => {
     setNotes(initialNotes)
     lastSaved.current = initialNotes
   }, [initialNotes, leadId])
 
-  // Draft aus localStorage laden
   useEffect(() => {
     try {
       const raw = localStorage.getItem(NOTES_DRAFT_KEY(leadId))
@@ -158,7 +158,6 @@ export function NotesFormCard({
     }
   }, [leadId, initialNotes])
 
-  // Live-Speichern im localStorage bei Änderung
   useEffect(() => {
     try {
       if (notes === initialNotes || !notes.trim()) {
@@ -190,121 +189,117 @@ export function NotesFormCard({
     } catch {}
   }
 
-  const validState = notes.trim().length > 10 ? 'valid' : notes.trim().length === 0 ? 'idle' : 'idle'
+  const validState = notes.trim().length > 10 ? 'valid' : 'idle'
 
   return (
-    <>
-      <CardHeader className="pb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle className="text-base font-semibold tracking-tight inline-flex items-center gap-2">
-              <Pencil className="h-4 w-4 text-slate-400" />
-              Notizen
-              {draftMode !== 'none' ? (
-                <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 fade-slide-up">
-                  {draftMode === 'has-draft' ? (
-                    <>
-                      <FileWarning className="h-2.5 w-2.5" />
-                      Nicht gespeicherter Entwurf
-                    </>
-                  ) : (
-                    <>
-                      <AlertCircle className="h-2.5 w-2.5" />
-                      Ungespeicherte Änderungen
-                    </>
-                  )}
-                </span>
-              ) : null}
-            </CardTitle>
-            <CardDescription className="text-xs pt-0.5">Interne Hinweise zum Lead</CardDescription>
-          </div>
-          <div className="flex items-center gap-1">
-            {draftMode === 'has-draft' ? (
-              <button
-                type="button"
-                onClick={resetToSaved}
-                title="Gespeicherten Stand wiederherstellen"
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
-              >
-                <RotateCcw className="h-3 w-3" />
-                Gespeichert laden
-              </button>
-            ) : draftMode === 'mismatch' ? (
-              <button
-                type="button"
-                onClick={resetToDraft}
-                title="Entwurf wiederherstellen"
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 text-[11px] font-medium text-amber-700 hover:bg-amber-100"
-              >
-                <FileWarning className="h-3 w-3" />
-                Entwurf laden
-              </button>
+    <div className="space-y-2.5">
+      <div className="flex items-start gap-2">
+        <div className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+          <Pencil className="h-3.5 w-3.5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center flex-wrap gap-1.5">
+            <div className="text-sm font-semibold text-slate-800 tracking-tight leading-tight">Notizen</div>
+            {draftMode !== 'none' ? (
+              <span className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-medium text-amber-700 fade-slide-up">
+                {draftMode === 'has-draft' ? (
+                  <>
+                    <FileWarning className="h-2.5 w-2.5" />
+                    Entwurf
+                  </>
+                ) : (
+                  <>
+                    <AlertCircle className="h-2.5 w-2.5" />
+                    Ungespeichert
+                  </>
+                )}
+              </span>
             ) : null}
           </div>
+          <div className="text-[11px] text-slate-500 leading-tight">Interne Hinweise & Gesprächsnotizen</div>
         </div>
-      </CardHeader>
-      <div className="px-6 pb-6 pt-0 space-y-3">
-        <form
-          action={(fd) => {
-            const val = String(fd.get('notes') ?? '')
-            lastSaved.current = val
-            try {
-              localStorage.removeItem(NOTES_DRAFT_KEY(leadId))
-            } catch {}
-            setSavedKey((k) => k + 1)
-            setDraftMode('none')
-            showSaveIndicator('Notizen werden gespeichert…')
-            formAction(fd)
-          }}
-          className="space-y-3"
-        >
-          <input type="hidden" name="leadId" value={leadId} />
-          <Textarea
-            name="notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Notizen zum Gespräch, Besonderheiten, Konditionen…"
-            rows={5}
-            className={cn(
-              'resize-none text-sm transition-all duration-150',
-              validState === 'valid' && draftMode === 'mismatch' && 'field-valid',
-              state?.error && 'field-invalid',
-            )}
-          />
-          <div className="flex items-center justify-between text-[11px] text-slate-500 tabular-nums">
-            <span>
-              {notes.trim().length} Zeichen
-            </span>
-            <span>
-              {draftMode === 'none' ? (
-                <span className="inline-flex items-center gap-1 text-emerald-600">
-                  <Check className="h-3 w-3" />
-                  Gespeicherter Stand
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 text-amber-600">
-                  <FileWarning className="h-3 w-3" />
-                  Änderungen werden lokal vorgehalten
-                </span>
-              )}
-            </span>
-          </div>
-          {state?.error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 fade-slide-up">
-              {state.error}
-            </div>
-          )}
-          <SubmitButton variant="outline" size="sm" className="w-full">
-            <Save className="h-4 w-4" />
-            Notizen speichern
-          </SubmitButton>
-        </form>
+        <div className="flex items-center gap-1 shrink-0">
+          {draftMode === 'has-draft' ? (
+            <button
+              type="button"
+              onClick={resetToSaved}
+              title="Gespeicherten Stand laden"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+            >
+              <RotateCcw className="h-3 w-3" />
+              Laden
+            </button>
+          ) : draftMode === 'mismatch' ? (
+            <button
+              type="button"
+              onClick={resetToDraft}
+              title="Entwurf laden"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+            >
+              <FileWarning className="h-3 w-3" />
+              Entwurf
+            </button>
+          ) : null}
+        </div>
       </div>
-    </>
+      <form
+        action={(fd) => {
+          const val = String(fd.get('notes') ?? '')
+          lastSaved.current = val
+          try {
+            localStorage.removeItem(NOTES_DRAFT_KEY(leadId))
+          } catch {}
+          setSavedKey((k) => k + 1)
+          setDraftMode('none')
+          showSaveIndicator('Notizen werden gespeichert…')
+          formAction(fd)
+        }}
+        className="space-y-2"
+      >
+        <input type="hidden" name="leadId" value={leadId} />
+        <Textarea
+          name="notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Gesprächsnotizen, Besonderheiten, Konditionen…"
+          rows={5}
+          className={cn(
+            'resize-none text-sm transition-all duration-150 leading-relaxed',
+            validState === 'valid' && draftMode === 'mismatch' && 'field-valid',
+            state?.error && 'field-invalid',
+          )}
+        />
+        <div className="flex items-center justify-between text-[10px] text-slate-500 tabular-nums">
+          <span>{notes.trim().length} Zeichen</span>
+          <span>
+            {draftMode === 'none' ? (
+              <span className="inline-flex items-center gap-1 text-emerald-600">
+                <Check className="h-2.5 w-2.5" />
+                Gespeichert
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-amber-600">
+                <FileWarning className="h-2.5 w-2.5" />
+                Lokal vorgehalten
+              </span>
+            )}
+          </span>
+        </div>
+        {state?.error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 fade-slide-up">
+            {state.error}
+          </div>
+        )}
+        <SubmitButton variant="outline" size="sm" className="w-full h-9 text-xs">
+          <Save className="h-3.5 w-3.5" />
+          Notizen speichern
+        </SubmitButton>
+      </form>
+    </div>
   )
 }
 
-/* ---------- Kontaktversuch ---------- */
+/* ---------- Kontaktversuch (Kompakt) ---------- */
 export function ContactAttemptForm({ leadId }: { leadId: string }) {
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
     async (_, fd) => (await addContactAttemptAction(fd)) as any,
@@ -324,116 +319,124 @@ export function ContactAttemptForm({ leadId }: { leadId: string }) {
 
   function validate(): boolean {
     const e: Record<string, string> = {}
-    if (!dateVal) e.date = 'Datum ist erforderlich'
-    if (!timeVal) e.time = 'Uhrzeit ist erforderlich'
-    if (noteVal.length > 2000) e.notes = 'Max. 2000 Zeichen erlaubt'
+    if (!dateVal) e.date = 'Datum erforderlich'
+    if (!timeVal) e.time = 'Uhrzeit erforderlich'
+    if (noteVal.length > 2000) e.notes = 'Max. 2000 Zeichen'
     setErrors(e)
     return Object.keys(e).length === 0
   }
 
   return (
-    <>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base font-semibold tracking-tight inline-flex items-center gap-2">
-          <Phone className="h-4 w-4 text-slate-400" />
-          Neuer Kontaktversuch
-        </CardTitle>
-        <CardDescription className="text-xs">Dokumentiere das Ergebnis des Gesprächs</CardDescription>
-      </CardHeader>
-      <div className="px-6 pb-6 pt-0">
-        <form
-          action={(fd) => {
-            if (!validate()) return
-            formAction(fd)
-          }}
-          className="space-y-3"
-        >
-          <input type="hidden" name="leadId" value={leadId} />
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor={`ca-date-${leadId}`}>Datum</Label>
-              <Input
-                id={`ca-date-${leadId}`}
-                type="date"
-                name="date"
-                value={dateVal}
-                onChange={(e) => {
-                  setDateVal(e.target.value)
-                  setErrors((p) => ({ ...p, date: '' }))
-                }}
-                className={cn(errors.date && 'field-invalid', !errors.date && dateVal && 'field-valid')}
-              />
-              {errors.date ? <div className="text-[10px] text-red-600">{errors.date}</div> : null}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`ca-time-${leadId}`}>Uhrzeit</Label>
-              <Input
-                id={`ca-time-${leadId}`}
-                type="time"
-                name="time"
-                value={timeVal}
-                onChange={(e) => {
-                  setTimeVal(e.target.value)
-                  setErrors((p) => ({ ...p, time: '' }))
-                }}
-                className={cn(errors.time && 'field-invalid', !errors.time && timeVal && 'field-valid')}
-              />
-              {errors.time ? <div className="text-[10px] text-red-600">{errors.time}</div> : null}
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={`ca-result-${leadId}`}>Ergebnis</Label>
-            <Select name="result" value={resultVal} onValueChange={(v) => setResultVal(v as any)}>
-              <SelectTrigger id={`ca-result-${leadId}`}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {results.map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {CONTACT_RESULT_LABELS[r]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={`ca-notes-${leadId}`}>Notiz (optional)</Label>
-            <Textarea
-              id={`ca-notes-${leadId}`}
-              name="notes"
-              rows={2}
-              value={noteVal}
-              onChange={(e) => {
-                setNoteVal(e.target.value)
-                if (e.target.value.length > 2000) setErrors((p) => ({ ...p, notes: 'Max. 2000 Zeichen erlaubt' }))
-                else setErrors((p) => ({ ...p, notes: '' }))
-              }}
-              placeholder="Gesprächsinhalt, Konditionen, Bedenken…"
-              className={cn('resize-none text-sm', errors.notes && 'field-invalid')}
-            />
-            <div className="flex items-center justify-between text-[10px] text-slate-500 tabular-nums">
-              <span>{errors.notes ?? ''}</span>
-              <span className={cn(noteVal.length > 1800 && 'text-amber-600', noteVal.length > 2000 && 'text-red-600')}>
-                {noteVal.length}/2000
-              </span>
-            </div>
-          </div>
-          {state?.error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 fade-slide-up">
-              {state.error}
-            </div>
-          )}
-          <SubmitButton variant="default" className="w-full h-10">
-            <Plus className="h-4 w-4" />
-            Kontaktversuch speichern
-          </SubmitButton>
-        </form>
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600 border border-blue-100">
+          <Phone className="h-3.5 w-3.5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-slate-800 tracking-tight leading-tight">Neuer Kontaktversuch</div>
+          <div className="text-[11px] text-slate-500 leading-tight">Dokumentiere das Gesprächsergebnis</div>
+        </div>
       </div>
-    </>
+      <form
+        action={(fd) => {
+          if (!validate()) return
+          formAction(fd)
+        }}
+        className="space-y-2"
+      >
+        <input type="hidden" name="leadId" value={leadId} />
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label htmlFor={`ca-date-${leadId}`} className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
+              Datum
+            </Label>
+            <Input
+              id={`ca-date-${leadId}`}
+              type="date"
+              name="date"
+              value={dateVal}
+              onChange={(e) => {
+                setDateVal(e.target.value)
+                setErrors((p) => ({ ...p, date: '' }))
+              }}
+              className={cn('h-9 text-xs', errors.date && 'field-invalid', !errors.date && dateVal && 'field-valid')}
+            />
+            {errors.date && <div className="text-[9px] text-red-600 leading-tight">{errors.date}</div>}
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`ca-time-${leadId}`} className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
+              Uhrzeit
+            </Label>
+            <Input
+              id={`ca-time-${leadId}`}
+              type="time"
+              name="time"
+              value={timeVal}
+              onChange={(e) => {
+                setTimeVal(e.target.value)
+                setErrors((p) => ({ ...p, time: '' }))
+              }}
+              className={cn('h-9 text-xs', errors.time && 'field-invalid', !errors.time && timeVal && 'field-valid')}
+            />
+            {errors.time && <div className="text-[9px] text-red-600 leading-tight">{errors.time}</div>}
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`ca-result-${leadId}`} className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
+            Ergebnis
+          </Label>
+          <Select name="result" value={resultVal} onValueChange={(v) => setResultVal(v as any)}>
+            <SelectTrigger id={`ca-result-${leadId}`} className="h-9 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {results.map((r) => (
+                <SelectItem key={r} value={r} className="text-sm">
+                  {CONTACT_RESULT_LABELS[r]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`ca-notes-${leadId}`} className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
+            Notiz (optional)
+          </Label>
+          <Textarea
+            id={`ca-notes-${leadId}`}
+            name="notes"
+            rows={2}
+            value={noteVal}
+            onChange={(e) => {
+              setNoteVal(e.target.value)
+              if (e.target.value.length > 2000) setErrors((p) => ({ ...p, notes: 'Max. 2000 Zeichen' }))
+              else setErrors((p) => ({ ...p, notes: '' }))
+            }}
+            placeholder="Gesprächsinhalt, Konditionen, Bedenken…"
+            className={cn('resize-none text-xs leading-relaxed', errors.notes && 'field-invalid')}
+          />
+          <div className="flex items-center justify-between text-[9px] text-slate-500 tabular-nums">
+            <span>{errors.notes ?? ''}</span>
+            <span className={cn(noteVal.length > 1800 && 'text-amber-600', noteVal.length > 2000 && 'text-red-600')}>
+              {noteVal.length}/2000
+            </span>
+          </div>
+        </div>
+        {state?.error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 fade-slide-up">
+            {state.error}
+          </div>
+        )}
+        <SubmitButton variant="default" size="sm" className="w-full h-9 text-xs">
+          <Plus className="h-3.5 w-3.5" />
+          Kontaktversuch speichern
+        </SubmitButton>
+      </form>
+    </div>
   )
 }
 
-/* ---------- Rückruf ---------- */
+/* ---------- Rückruf (Kompakt) ---------- */
 export function CallbackForm({ leadId }: { leadId: string }) {
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
     async (_, fd) => (await createCallbackAction(fd)) as any,
@@ -451,103 +454,103 @@ export function CallbackForm({ leadId }: { leadId: string }) {
 
   function validate(): boolean {
     const e: Record<string, string> = {}
-    if (!dateVal) e.date = 'Datum ist erforderlich'
-    if (!timeVal) e.time = 'Uhrzeit ist erforderlich'
-    if (dateVal && timeVal) {
-      const ts = new Date(`${dateVal}T${timeVal}:00`).getTime()
-      if (Number.isFinite(ts) && ts < Date.now() - 60_000) {
-        // Vergangenheit mit Warnung, aber nicht blockieren
-      }
-    }
-    if (noteVal.length > 500) e.notes = 'Max. 500 Zeichen erlaubt'
+    if (!dateVal) e.date = 'Datum erforderlich'
+    if (!timeVal) e.time = 'Uhrzeit erforderlich'
+    if (noteVal.length > 500) e.notes = 'Max. 500 Zeichen'
     setErrors(e)
     return Object.keys(e).length === 0
   }
 
   return (
-    <>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base font-semibold tracking-tight inline-flex items-center gap-2">
-          <CalendarDays className="h-4 w-4 text-slate-400" />
-          Rückruf planen
-        </CardTitle>
-        <CardDescription className="text-xs">Setze einen Zeitpunkt für den nächsten Kontakt</CardDescription>
-      </CardHeader>
-      <div className="px-6 pb-6 pt-0">
-        <form
-          action={(fd) => {
-            if (!validate()) return
-            formAction(fd)
-          }}
-          className="space-y-3"
-        >
-          <input type="hidden" name="leadId" value={leadId} />
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor={`cb-date-${leadId}`}>Datum</Label>
-              <Input
-                id={`cb-date-${leadId}`}
-                type="date"
-                name="date"
-                value={dateVal}
-                onChange={(e) => {
-                  setDateVal(e.target.value)
-                  setErrors((p) => ({ ...p, date: '' }))
-                }}
-                className={cn(errors.date && 'field-invalid', !errors.date && dateVal && 'field-valid')}
-              />
-              {errors.date ? <div className="text-[10px] text-red-600">{errors.date}</div> : null}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`cb-time-${leadId}`}>Uhrzeit</Label>
-              <Input
-                id={`cb-time-${leadId}`}
-                type="time"
-                name="time"
-                value={timeVal}
-                onChange={(e) => {
-                  setTimeVal(e.target.value)
-                  setErrors((p) => ({ ...p, time: '' }))
-                }}
-                className={cn(errors.time && 'field-invalid', !errors.time && timeVal && 'field-valid')}
-              />
-              {errors.time ? <div className="text-[10px] text-red-600">{errors.time}</div> : null}
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={`cb-notes-${leadId}`}>Notiz (optional)</Label>
-            <Textarea
-              id={`cb-notes-${leadId}`}
-              name="notes"
-              rows={2}
-              value={noteVal}
-              onChange={(e) => {
-                setNoteVal(e.target.value)
-                if (e.target.value.length > 500) setErrors((p) => ({ ...p, notes: 'Max. 500 Zeichen erlaubt' }))
-                else setErrors((p) => ({ ...p, notes: '' }))
-              }}
-              placeholder="Thema, Erinnerung…"
-              className={cn('resize-none text-sm', errors.notes && 'field-invalid')}
-            />
-            <div className="flex items-center justify-between text-[10px] text-slate-500 tabular-nums">
-              <span>{errors.notes ?? ''}</span>
-              <span className={cn(noteVal.length > 400 && 'text-amber-600', noteVal.length > 500 && 'text-red-600')}>
-                {noteVal.length}/500
-              </span>
-            </div>
-          </div>
-          {state?.error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 fade-slide-up">
-              {state.error}
-            </div>
-          )}
-          <SubmitButton variant="default" className="w-full h-10">
-            <CalendarDays className="h-4 w-4" />
-            Rückruf speichern
-          </SubmitButton>
-        </form>
+    <div className="space-y-2.5">
+      <div className="flex items-center gap-2">
+        <div className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-50 text-amber-600 border border-amber-100">
+          <CalendarDays className="h-3.5 w-3.5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-slate-800 tracking-tight leading-tight">Rückruf planen</div>
+          <div className="text-[11px] text-slate-500 leading-tight">Zeitpunkt für nächsten Kontakt setzen</div>
+        </div>
       </div>
-    </>
+      <form
+        action={(fd) => {
+          if (!validate()) return
+          formAction(fd)
+        }}
+        className="space-y-2"
+      >
+        <input type="hidden" name="leadId" value={leadId} />
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label htmlFor={`cb-date-${leadId}`} className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
+              Datum
+            </Label>
+            <Input
+              id={`cb-date-${leadId}`}
+              type="date"
+              name="date"
+              value={dateVal}
+              onChange={(e) => {
+                setDateVal(e.target.value)
+                setErrors((p) => ({ ...p, date: '' }))
+              }}
+              className={cn('h-9 text-xs', errors.date && 'field-invalid', !errors.date && dateVal && 'field-valid')}
+            />
+            {errors.date && <div className="text-[9px] text-red-600 leading-tight">{errors.date}</div>}
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`cb-time-${leadId}`} className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
+              Uhrzeit
+            </Label>
+            <Input
+              id={`cb-time-${leadId}`}
+              type="time"
+              name="time"
+              value={timeVal}
+              onChange={(e) => {
+                setTimeVal(e.target.value)
+                setErrors((p) => ({ ...p, time: '' }))
+              }}
+              className={cn('h-9 text-xs', errors.time && 'field-invalid', !errors.time && timeVal && 'field-valid')}
+            />
+            {errors.time && <div className="text-[9px] text-red-600 leading-tight">{errors.time}</div>}
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`cb-notes-${leadId}`} className="text-[10px] uppercase tracking-widest text-slate-400 font-medium">
+            Notiz (optional)
+          </Label>
+          <Textarea
+            id={`cb-notes-${leadId}`}
+            name="notes"
+            rows={2}
+            value={noteVal}
+            onChange={(e) => {
+              setNoteVal(e.target.value)
+              if (e.target.value.length > 500) setErrors((p) => ({ ...p, notes: 'Max. 500 Zeichen' }))
+              else setErrors((p) => ({ ...p, notes: '' }))
+            }}
+            placeholder="Thema, Erinnerung…"
+            className={cn('resize-none text-xs leading-relaxed', errors.notes && 'field-invalid')}
+          />
+          <div className="flex items-center justify-between text-[9px] text-slate-500 tabular-nums">
+            <span>{errors.notes ?? ''}</span>
+            <span className={cn(noteVal.length > 400 && 'text-amber-600', noteVal.length > 500 && 'text-red-600')}>
+              {noteVal.length}/500
+            </span>
+          </div>
+        </div>
+        {state?.error && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700 fade-slide-up">
+            {state.error}
+          </div>
+        )}
+        <SubmitButton variant="default" size="sm" className="w-full h-9 text-xs">
+          <CalendarDays className="h-3.5 w-3.5" />
+          Rückruf speichern
+        </SubmitButton>
+      </form>
+    </div>
   )
 }
 
