@@ -7,8 +7,6 @@ import { LeadAvatar } from '@/components/ui-custom/LeadAvatar'
 import LeadDetailContent from './LeadTabsPanel'
 import {
   ArrowLeft,
-  Phone,
-  Mail,
   ChevronUp,
   Clock,
   UserCircle,
@@ -94,26 +92,8 @@ export default async function LeadDetailPage({ params }: { params: { id: string 
             </div>
         </div>
 
-        {/* Rechte Seite: Quick Links (Desktop) */}
+        {/* Rechte Seite: Quick Link Zur Liste (Anruf/Mail sind im Sticky-Footer) */}
         <div className="hidden sm:flex items-center gap-1.5 shrink-0">
-          {lead.phone && (
-            <a
-              href={phoneHref(lead.phone)}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
-            >
-              <Phone className="h-3.5 w-3.5" />
-              Anrufen
-            </a>
-          )}
-          {lead.email && (
-            <a
-              href={`mailto:${lead.email}`}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
-            >
-              <Mail className="h-3.5 w-3.5" />
-              E-Mail
-            </a>
-          )}
           <Link
             href={listHref}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white shadow-sm hover:bg-slate-800"

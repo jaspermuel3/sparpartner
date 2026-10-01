@@ -238,7 +238,7 @@ function CallQuickOverlay({
     <div
       aria-hidden={!open}
       className={cn(
-        'fixed bottom-[88px] left-1/2 z-[60] w-[94vw] max-w-md -translate-x-1/2 transition-all duration-300',
+        'fixed bottom-[64px] left-1/2 z-[998] w-[94vw] max-w-md -translate-x-1/2 transition-all duration-300 sm:bottom-[68px]',
         open
           ? 'opacity-100 translate-y-0 visible pointer-events-auto'
           : 'opacity-0 translate-y-4 invisible pointer-events-none',
@@ -422,52 +422,55 @@ export function LeadActionBar({
     <>
       {mounted && barNode
         ? createPortal(
-            <div
-              className="fixed z-[999] w-full border-t border-slate-200 bg-white/98 backdrop-blur-xl shadow-[0_-10px_40px_-10px_rgba(15,23,42,0.2)] pb-[env(safe-area-inset-bottom,0px)]"
-              style={barStyle}
-            >
-              <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-2 px-3 py-2 sm:px-6 sm:py-2.5">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="hidden text-[10px] font-semibold uppercase tracking-widest text-slate-400 sm:inline">
-                    Schnellaktionen
-                  </span>
-                </div>
-                <div className="flex flex-1 items-center justify-end gap-1.5 sm:gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                  {phone ? (
-                    <ActionButton label="Lead anrufen + Schnellauswertung" onClick={() => setCallOpen(true)} variant="brand">
-                      <PhoneCall className="h-4 w-4" />
+            <>
+              <div
+                className="fixed z-[999] w-full border-t border-slate-200 bg-white/98 backdrop-blur-xl shadow-[0_-10px_40px_-10px_rgba(15,23,42,0.2)] pb-[env(safe-area-inset-bottom,0px)]"
+                style={barStyle}
+              >
+                <div className="mx-auto flex w-full max-w-7xl items-center justify-between gap-2 px-3 py-2 sm:px-6 sm:py-2.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="hidden text-[10px] font-semibold uppercase tracking-widest text-slate-400 sm:inline">
+                      Schnellaktionen
+                    </span>
+                  </div>
+                  <div className="flex flex-1 items-center justify-end gap-1.5 sm:gap-2 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                    {phone ? (
+                      <ActionButton label="Lead anrufen + Schnellauswertung" onClick={() => setCallOpen(true)} variant="brand">
+                        <PhoneCall className="h-4 w-4" />
+                      </ActionButton>
+                    ) : null}
+                    {email ? (
+                      <ActionButton label="E-Mail schreiben" href={`mailto:${email}`}>
+                        <Mail className="h-4 w-4" />
+                      </ActionButton>
+                    ) : null}
+                    {phone ? (
+                      <CopyButton text={phone} ariaLabel="Telefonnummer kopieren" size="sm" className="h-10 w-10 !p-0">
+                        <span className="inline-flex items-center justify-center w-full h-full">
+                          <Phone className="h-3.5 w-3.5" />
+                        </span>
+                      </CopyButton>
+                    ) : null}
+                    <QuickStatusSelect leadId={leadId} />
+                    <NextLeadButton currentId={leadId} />
+                    <ActionButton label="Leads-Liste öffnen" href="/my-leads" variant="primary">
+                      <ArrowUpRight className="h-4 w-4" />
                     </ActionButton>
-                  ) : null}
-                  {email ? (
-                    <ActionButton label="E-Mail schreiben" href={`mailto:${email}`}>
-                      <Mail className="h-4 w-4" />
-                    </ActionButton>
-                  ) : null}
-                  {phone ? (
-                    <CopyButton text={phone} ariaLabel="Telefonnummer kopieren" size="sm" className="h-10 w-10 !p-0">
-                      <span className="inline-flex items-center justify-center w-full h-full">
-                        <Phone className="h-3.5 w-3.5" />
-                      </span>
-                    </CopyButton>
-                  ) : null}
-                  <QuickStatusSelect leadId={leadId} />
-                  <NextLeadButton currentId={leadId} />
-                  <ActionButton label="Leads-Liste öffnen" href="/my-leads" variant="primary">
-                    <ArrowUpRight className="h-4 w-4" />
-                  </ActionButton>
+                  </div>
                 </div>
               </div>
-            </div>,
+
+              <CallQuickOverlay
+                open={callOpen}
+                onClose={() => setCallOpen(false)}
+                leadId={leadId}
+                name={name ?? ''}
+                phone={phone}
+              />
+            </>,
             barNode,
           )
         : null}
-      <CallQuickOverlay
-        open={callOpen}
-        onClose={() => setCallOpen(false)}
-        leadId={leadId}
-        name={name ?? ''}
-        phone={phone}
-      />
     </>
   )
 }

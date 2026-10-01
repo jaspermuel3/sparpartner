@@ -64,26 +64,29 @@ export function NotificationCenter() {
   const [open, setOpen] = useState(false)
   const [unread, setUnread] = useState(0)
   const [items, setItems] = useState<Notification[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-  async function refresh(open = false) {
+  async function refresh(forceItems = false) {
     try {
-      setLoading(true)
+      setLoading((prev) => (forceItems ? true : prev))
+      const needItems = forceItems || items.length === 0
       const [countRes, notifRes] = await Promise.all([
         getUnreadCountAction(),
-        open ? getNotificationsAction(false, 30) : Promise.resolve({ ok: true, data: items }),
+        needItems ? getNotificationsAction(false, 30) : Promise.resolve({ ok: true, data: items }),
       ])
       if ('count' in countRes && countRes.ok) setUnread(countRes.count)
-      if (open && 'ok' in notifRes && notifRes.ok && Array.isArray((notifRes as any).data)) setItems((notifRes as any).data)
+      if (needItems && 'ok' in notifRes && notifRes.ok && Array.isArray((notifRes as any).data)) {
+        setItems((notifRes as any).data)
+      }
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    refresh(false)
-    const t = setInterval(() => refresh(false), 60_000)
+    refresh(true)
+    const t = setInterval(() => refresh(false), 45_000)
     return () => clearInterval(t)
   }, [])
 

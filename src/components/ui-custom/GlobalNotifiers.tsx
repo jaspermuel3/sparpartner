@@ -1,12 +1,18 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { getDueCallbackRemindersAction, getAvailableLeadCountsAction } from '@/app/actions'
+import {
+  getDueCallbackRemindersAction,
+  getAvailableLeadCountsAction,
+  persistLeadAvailableNotificationAction,
+  persistCallbackDueNotificationAction,
+} from '@/app/actions'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { Bell, PhoneForwarded, Layers } from 'lucide-react'
 import { ProductType } from '@/types'
 import { TOKEN_TYPE_LABELS } from '@/lib/constants'
+import { useFormState } from 'react-dom'
 
 const STORAGE_KEY = 'crm:notifications:last_prompt_dismissed'
 const WAITLIST_STORAGE_KEY = 'crm:notifications:waitlist_last_notified'
@@ -24,6 +30,9 @@ function persistCallbackRef(ref: React.MutableRefObject<Record<string, number>>)
 export function GlobalNotifiers() {
   const lastNotifiedWaitlistRef = useRef<Record<string, number>>({})
   const lastNotifiedCallbackRef = useRef<Record<string, number>>({})
+
+  const [, persistWaitlistAction] = useFormState(persistLeadAvailableNotificationAction, null)
+  const [, persistCallbackAction] = useFormState(persistCallbackDueNotificationAction, null)
 
   useEffect(() => {
     try {
@@ -78,6 +87,12 @@ export function GlobalNotifiers() {
               if (t > 0) products.push(`${t}x Beides`)
               if (s > 0) products.push(`${s}x Strom`)
               if (g > 0) products.push(`${g}x Gas`)
+
+              const fdWaitlist = new FormData()
+              fdWaitlist.append('product', totalAvail === t + s + g ? null as any : (products.join(', ') as any))
+              fdWaitlist.append('count', String(totalAvail))
+              try { persistWaitlistAction(fdWaitlist) } catch {}
+
               const id = toast.custom(
                 (tID) => (
                   <div className="pointer-events-auto flex min-w-[320px] max-w-sm items-start gap-3 rounded-2xl border border-sky-200 bg-white shadow-2xl p-4 animate-in fade-in slide-in-from-right-4">
@@ -140,6 +155,13 @@ export function GlobalNotifiers() {
                   ? `Seit ${mins} Min. überfällig. Sofort anrufen.`
                   : cbDate.toLocaleString('de-DE', { hour: '2-digit', minute: '2-digit' })
                 const cID = cb.id
+
+                const fdCb = new FormData()
+                fdCb.append('leadId', cb.lead_id)
+                fdCb.append('leadName', leadName)
+                fdCb.append('callbackAt', cb.callback_at)
+                try { persistCallbackAction(fdCb) } catch {}
+
                 toast.custom(
                   (tID) => (
                     <div className="pointer-events-auto flex min-w-[330px] max-w-sm items-start gap-3 rounded-2xl border border-orange-200 bg-white shadow-2xl p-4 animate-in fade-in slide-in-from-right-4">
@@ -208,7 +230,7 @@ export function GlobalNotifiers() {
       window.clearTimeout(immediate)
       window.clearInterval(interval)
     }
-  }, [])
+  }, [persistWaitlistAction, persistCallbackAction])
 
   return null
 }

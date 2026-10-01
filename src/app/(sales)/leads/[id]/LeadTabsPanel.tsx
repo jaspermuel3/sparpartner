@@ -321,13 +321,8 @@ export function LeadDetailContent(props: LeadDetailContentProps) {
 
               {/* ===== TAB 3: AKTIONEN ===== */}
               <TabsContent value="actions" className="mt-0 p-4 sm:p-5 space-y-4 data-[state=inactive]:hidden">
-                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200/80 bg-white p-4">
-                    <StatusFormCard initialStatus={lead.status as LeadStatus} leadId={lead.id} />
-                  </div>
-                  <div className="rounded-xl border border-slate-200/80 bg-white p-4">
-                    <NotesFormCard initialNotes={lead.notes ?? ''} leadId={lead.id} />
-                  </div>
+                <div className="rounded-xl border border-slate-200/80 bg-white p-4">
+                  <StatusFormCard initialStatus={lead.status as LeadStatus} leadId={lead.id} />
                 </div>
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                   <div className="rounded-xl border border-slate-200/80 bg-white p-4">

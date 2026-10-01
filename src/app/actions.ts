@@ -912,3 +912,34 @@ export async function getDueCallbackRemindersAction() {
   }
 }
 
+/* =========================
+   Client-seitige Notification-Persistenz (für GlobalNotifiers)
+   ========================= */
+
+export async function persistLeadAvailableNotificationAction(_prev: any, formData: FormData) {
+  try {
+    const user = await requireSeller()
+    const product = (formData.get('product') as string | null) ?? null
+    const count = Number(formData.get('count') ?? '1') || 1
+    await notifyLeadAvailable(user.id, product, count)
+    revalidatePath('/dashboard')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function persistCallbackDueNotificationAction(_prev: any, formData: FormData) {
+  try {
+    const user = await requireSeller()
+    const leadId = String(formData.get('leadId'))
+    const leadName = String(formData.get('leadName') ?? 'Lead')
+    const callbackAt = String(formData.get('callbackAt'))
+    await notifyCallbackDue(user.id, leadId, leadName, callbackAt)
+    revalidatePath('/dashboard')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
