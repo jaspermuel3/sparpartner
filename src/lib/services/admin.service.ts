@@ -50,7 +50,7 @@ export async function createSeller(
   return { userId: authData.user.id }
 }
 
-export async function updateSeller(userId: string, patch: Partial<Pick<DatabaseUser, 'full_name' | 'is_active'>>, updatedBy: string) {
+export async function updateSeller(userId: string, patch: Partial<Pick<DatabaseUser, 'full_name' | 'is_active' | 'role'>>, updatedBy: string) {
   const admin = createAdminClient()
   const { data: old } = await admin.from('users').select('*').eq('id', userId).maybeSingle()
   if (!old) throw new Error('USER_NOT_FOUND')

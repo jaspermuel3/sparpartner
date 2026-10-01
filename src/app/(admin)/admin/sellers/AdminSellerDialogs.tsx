@@ -33,7 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Plus, UserPlus, Coins, KeyRound, Ban, CheckCircle2, Users, Palette } from 'lucide-react'
+import { Plus, UserPlus, Coins, KeyRound, Ban, CheckCircle2, Users, Palette, Pencil } from 'lucide-react'
 
 /* -------- Create User -------- */
 export function CreateSellerDialog({ teams }: { teams?: any[] }) {
@@ -154,13 +154,14 @@ export function TokenDialog({
           variant="outline"
           size="sm"
           className={
-            'h-8 ' +
+            'h-9 px-3 border-slate-200 shadow-sm hover:shadow transition-all ' +
             (add
-              ? 'text-emerald-700 border-emerald-200 hover:bg-emerald-50'
-              : 'text-red-700 border-red-200 hover:bg-red-50')
+              ? 'text-emerald-700 hover:bg-emerald-50 hover:border-emerald-200'
+              : 'text-red-700 hover:bg-red-50 hover:border-red-200')
           }
         >
-          <Coins className={'h-3.5 w-3.5 mr-1'} /> {add ? '+ Tokens' : '- Tokens'}
+          <Coins className={'h-4 w-4 mr-1.5'} />
+          <span className="text-sm font-medium">{add ? '+ Tokens' : '− Tokens'}</span>
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -214,18 +215,18 @@ export function ToggleActiveButton({ seller }: { seller: any }) {
       <input type="hidden" name="userId" value={seller.id} />
       <input type="hidden" name="active" value={seller.is_active ? 'false' : 'true'} />
       <SubmitButton
-        variant="ghost"
+        variant="outline"
         size="sm"
         className={
-          'h-8 px-2 rounded-md border ' +
+          'h-9 px-3 border-slate-200 shadow-sm hover:shadow transition-all ' +
           (seller.is_active
-            ? 'border-red-200 text-red-700 hover:bg-red-50 shadow-none'
-            : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 shadow-none')
+            ? 'text-red-700 hover:bg-red-50 hover:border-red-200'
+            : 'text-emerald-700 hover:bg-emerald-50 hover:border-emerald-200')
         }
         pendingLabel="…"
       >
-        {seller.is_active ? <Ban className="h-3.5 w-3.5" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
-        {seller.is_active ? 'Deaktivieren' : 'Aktivieren'}
+        {seller.is_active ? <Ban className="h-4 w-4 mr-1.5" /> : <CheckCircle2 className="h-4 w-4 mr-1.5" />}
+        <span className="text-sm font-medium">{seller.is_active ? 'Deaktivieren' : 'Aktivieren'}</span>
       </SubmitButton>
     </form>
   )
@@ -241,8 +242,13 @@ export function EditSellerDialog({ seller, teams }: { seller: any; teams?: any[]
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-8">
-          Bearbeiten
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 px-3 border-slate-200 text-slate-700 shadow-sm hover:shadow hover:bg-slate-50 hover:border-slate-300 transition-all"
+        >
+          <Pencil className="h-4 w-4 mr-1.5" />
+          <span className="text-sm font-medium">Bearbeiten</span>
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -318,8 +324,13 @@ export function ResetPwdDialog({ seller }: { seller: any }) {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8">
-          <KeyRound className="h-3.5 w-3.5 mr-1" /> Passwort
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9 px-3 border-slate-200 text-slate-700 shadow-sm hover:shadow hover:bg-slate-50 hover:border-slate-300 transition-all"
+        >
+          <KeyRound className="h-4 w-4 mr-1.5" />
+          <span className="text-sm font-medium">Passwort</span>
         </Button>
       </DialogTrigger>
       <DialogContent>

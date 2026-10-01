@@ -301,9 +301,11 @@ export async function createSellerAction(formData: FormData) {
     const password = String(formData.get('password'))
     const full_name = String(formData.get('full_name'))
     const initial_balance_raw = Number(formData.get('initial_balance') ?? 0) || 0
+    const role_raw = formData.get('role') ? String(formData.get('role')) : 'seller'
+    const role = role_raw === 'admin' ? 'admin' : 'seller'
 
     const res = await svcCreateSeller(
-      { email, password, full_name, initial_balance: initial_balance_raw },
+      { email, password, full_name, initial_balance: initial_balance_raw, role },
       adminUser.id,
     )
     revalidatePath('/admin/sellers')
@@ -318,8 +320,10 @@ export async function updateSellerAction(formData: FormData) {
     const adminUser = await requireAdmin()
     const userId = String(formData.get('userId'))
     const full_name = String(formData.get('full_name') ?? '')
+    const role_raw = formData.get('role') ? String(formData.get('role')) : null
     const patch: any = {}
     if (full_name) patch.full_name = full_name
+    if (role_raw === 'admin' || role_raw === 'seller') patch.role = role_raw
     await svcUpdateSeller(userId, patch, adminUser.id)
     revalidatePath('/admin/sellers')
     return { ok: true }

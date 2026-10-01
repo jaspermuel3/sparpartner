@@ -80,7 +80,7 @@ export function SellerDetailClient({
         description={seller.email}
         breadcrumb={[
           { label: 'Admin', href: '/admin/dashboard' },
-          { label: 'Verkäufer', href: '/admin/sellers' },
+          { label: 'Benutzer', href: '/admin/sellers' },
           { label: sellerName },
         ]}
         actions={
@@ -106,6 +106,15 @@ export function SellerDetailClient({
                   <h2 className="text-lg font-semibold tracking-tight text-slate-900">
                     {sellerName}
                   </h2>
+                  {seller.role === 'admin' ? (
+                    <Badge variant="outline" className="bg-indigo-50 text-indigo-700 border-indigo-200">
+                      Admin
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="bg-slate-100 text-slate-700 border-slate-200">
+                      Verkäufer
+                    </Badge>
+                  )}
                   {seller.is_active ? (
                     <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 mr-1.5" />
@@ -130,9 +139,6 @@ export function SellerDetailClient({
                   )}
                 </div>
                 <div className="mt-1 text-sm text-slate-500">{seller.email}</div>
-                <div className="mt-0.5 text-xs text-slate-400 capitalize">
-                  Rolle: {seller.role === 'admin' ? 'Administrator' : 'Verkäufer'}
-                </div>
               </div>
             </div>
             <div className="flex items-center gap-3">

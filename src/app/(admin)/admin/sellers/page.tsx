@@ -418,7 +418,7 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
   const p = seller.perf ?? {}
   const isAdmin = seller.role === 'admin'
   return (
-    <TableRow className="hover:bg-slate-50">
+    <TableRow className="hover:bg-slate-50/80 group transition-colors">
       <TableCell className="w-[44px]">
         <label className="flex items-center justify-center h-5 cursor-pointer">
           <input
@@ -516,8 +516,8 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
       <TableCell className="hidden xl:table-cell text-right text-sm text-slate-700 tabular-nums">
         {(p.durchschnitt_kontakte ?? 0).toFixed(1)}
       </TableCell>
-      <TableCell className="text-right">
-        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+      <TableCell className="text-right w-[260px]">
+        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
           <TokenDialog seller={seller} mode="add" />
           <TokenDialog seller={seller} mode="subtract" />
           <ToggleActiveButton seller={seller} />

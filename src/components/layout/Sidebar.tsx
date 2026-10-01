@@ -44,7 +44,7 @@ const SALES_NAV: NavItem[] = [
 const ADMIN_NAV: NavItem[] = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/leads', label: 'Leads', icon: Layers },
-  { href: '/admin/sellers', label: 'Verkäufer', icon: Users },
+  { href: '/admin/sellers', label: 'Benutzer', icon: Users },
   { href: '/admin/tokens', label: 'Tokens', icon: CreditCard },
   { href: '/admin/stats', label: 'Statistiken', icon: BarChart3 },
   { href: '/admin/audit-log', label: 'Audit-Log', icon: ShieldCheck },

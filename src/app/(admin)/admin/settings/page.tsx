@@ -61,7 +61,7 @@ export default async function AdminSettingsPage() {
                 href="/admin/sellers"
                 className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
               >
-                Verkäufer verwalten →
+                Benutzer verwalten →
               </Link>
             </CardContent>
           </Card>
