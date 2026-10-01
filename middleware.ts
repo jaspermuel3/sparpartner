@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { createAdminClient } from './src/lib/supabase/admin'
+import { createAdminClient } from '@/lib/supabase/admin'
 
 const PUBLIC_ROUTES = ['/login', '/auth/callback', '/api/auth', '/favicon.ico']
 const SALES_ROUTES_PREFIXES = ['/dashboard', '/request-lead', '/my-leads', '/callbacks', '/stats', '/settings', '/leads/']
@@ -14,23 +14,23 @@ function copyCookies(from: NextResponse, to: NextResponse) {
 }
 
 function createMiddlewareClient(request: NextRequest, response: NextResponse) {
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          try { response.cookies.set({ name, value, ...options }) } catch {}
-        },
-        remove(name: string, options: CookieOptions) {
-          try { response.cookies.set({ name, value: '', ...options, maxAge: 0, expires: new Date(0) }) } catch {}
-        },
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !key) return null as any
+
+  return createServerClient(url, key, {
+    cookies: {
+      get(name: string) {
+        return request.cookies.get(name)?.value
+      },
+      set(name: string, value: string, options: CookieOptions) {
+        try { response.cookies.set({ name, value, ...options }) } catch {}
+      },
+      remove(name: string, options: CookieOptions) {
+        try { response.cookies.set({ name, value: '', ...options, maxAge: 0, expires: new Date(0) }) } catch {}
       },
     },
-  )
+  })
 }
 
 function clearAuthCookies(response: NextResponse) {
@@ -66,7 +66,15 @@ export async function middleware(request: NextRequest) {
   }
 
   let response = NextResponse.next({ request: { headers: request.headers } })
+
   const supabase = createMiddlewareClient(request, response)
+  if (!supabase) {
+    const redirectUrl = new URL('/login', request.url)
+    redirectUrl.searchParams.set('error', 'Server-Konfiguration unvollständig. Supabase-URL oder Anon-Key fehlen.')
+    const redirect = NextResponse.redirect(redirectUrl)
+    copyCookies(response, redirect)
+    return clearAuthCookies(redirect)
+  }
 
   let authUser = null
   try {
@@ -84,9 +92,9 @@ export async function middleware(request: NextRequest) {
     return clearAuthCookies(redirect)
   }
 
-  const admin = createAdminClient()
   let dbUser = null
   try {
+    const admin = createAdminClient()
     const res = await admin
       .from('users')
       .select('id, role, is_active')

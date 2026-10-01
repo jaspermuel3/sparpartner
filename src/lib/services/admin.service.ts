@@ -4,7 +4,7 @@ import type { DatabaseUser, Lead, LeadStatus } from '@/types'
 import { getUserEmailMap, withEmail } from '../user-emails'
 
 export async function createSeller(
-  input: { email: string; password: string; full_name: string; initial_balance?: number },
+  input: { email: string; password: string; full_name: string; initial_balance?: number; role?: 'admin' | 'seller' },
   createdBy: string,
 ): Promise<{ userId: string }> {
   const admin = createAdminClient()
@@ -16,10 +16,12 @@ export async function createSeller(
   if (authErr) throw authErr
   if (!authData.user) throw new Error('AUTH_CREATE_FAILED')
 
+  const role = input.role ?? 'seller'
+
   const { error: profileErr } = await admin.from('users').insert({
     id: authData.user.id,
     full_name: input.full_name,
-    role: 'seller',
+    role: role,
     is_active: true,
   })
   if (profileErr) throw profileErr
@@ -43,6 +45,7 @@ export async function createSeller(
   await logAudit(createdBy, 'SELLER_CREATED', 'user', authData.user.id, {
     email: input.email,
     full_name: input.full_name,
+    role: role,
   })
   return { userId: authData.user.id }
 }

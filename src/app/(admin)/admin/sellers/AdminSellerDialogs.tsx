@@ -35,7 +35,7 @@ import {
 } from '@/components/ui/select'
 import { Plus, UserPlus, Coins, KeyRound, Ban, CheckCircle2, Users, Palette } from 'lucide-react'
 
-/* -------- Create Seller -------- */
+/* -------- Create User -------- */
 export function CreateSellerDialog({ teams }: { teams?: any[] }) {
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
     async (_, fd) => (await createSellerWithTeamAction(fd)) as any,
@@ -47,14 +47,14 @@ export function CreateSellerDialog({ teams }: { teams?: any[] }) {
     <Dialog>
       <DialogTrigger asChild>
         <Button>
-          <Plus className="h-4 w-4 mr-1.5" /> Verkäufer erstellen
+          <Plus className="h-4 w-4 mr-1.5" /> Benutzer erstellen
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Neuer Verkäufer</DialogTitle>
+          <DialogTitle>Neuer Benutzer</DialogTitle>
           <DialogDescription>
-            Benutzer wird mit Rolle „Verkäufer“ angelegt und ein Token-Wallet erstellt.
+            Benutzerkonto mit gewählter Rolle anlegen. Ein Token-Wallet wird automatisch erstellt.
           </DialogDescription>
         </DialogHeader>
         <form action={formAction} className="space-y-3">
@@ -64,12 +64,24 @@ export function CreateSellerDialog({ teams }: { teams?: any[] }) {
               <Input name="full_name" required placeholder="Max Mustermann" />
             </div>
             <div className="space-y-1.5">
-              <Label>E-Mail</Label>
-              <Input name="email" type="email" required placeholder="max@unternehmen.de" />
+              <Label>Rolle</Label>
+              <Select name="role" defaultValue="seller">
+                <SelectTrigger>
+                  <SelectValue placeholder="Rolle wählen" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="seller">Verkäufer</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label>Initial-Passwort</Label>
               <Input name="password" type="text" required minLength={6} defaultValue="Seller1234!" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>E-Mail</Label>
+              <Input name="email" type="email" required placeholder="max@unternehmen.de" />
             </div>
             <div className="sm:col-span-2 space-y-1.5">
               <Label>Startguthaben (Tokens)</Label>
@@ -219,7 +231,7 @@ export function ToggleActiveButton({ seller }: { seller: any }) {
   )
 }
 
-/* -------- Edit Seller -------- */
+/* -------- Edit User -------- */
 export function EditSellerDialog({ seller, teams }: { seller: any; teams?: any[] }) {
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
     async (_, fd) => (await updateSellerWithTeamAction(fd)) as any,
@@ -235,7 +247,7 @@ export function EditSellerDialog({ seller, teams }: { seller: any; teams?: any[]
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Verkäufer bearbeiten</DialogTitle>
+          <DialogTitle>Benutzer bearbeiten</DialogTitle>
           <DialogDescription>Aktuell: {seller.full_name ?? seller.email}</DialogDescription>
         </DialogHeader>
         <form action={formAction} className="space-y-3">
@@ -243,6 +255,18 @@ export function EditSellerDialog({ seller, teams }: { seller: any; teams?: any[]
           <div className="space-y-1.5">
             <Label>Name</Label>
             <Input name="full_name" defaultValue={seller.full_name ?? ''} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Rolle</Label>
+            <Select name="role" defaultValue={seller.role ?? 'seller'}>
+              <SelectTrigger>
+                <SelectValue placeholder="Rolle wählen" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="seller">Verkäufer</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1.5">
             <Label>Team (optional)</Label>

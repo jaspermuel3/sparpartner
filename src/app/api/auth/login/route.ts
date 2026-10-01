@@ -3,55 +3,63 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
 
 function copyCookies(from: NextResponse, to: NextResponse) {
-  for (const c of from.cookies.getAll()) to.cookies.set(c)
+  for (const c of from.cookies.getAll()) {
+    try { to.cookies.set(c) } catch {}
+  }
   return to
 }
 
 export async function POST(request: NextRequest) {
-  const formData = await request.formData().catch(() => null)
+  let response = NextResponse.next({ request: { headers: request.headers } })
   const loginRedirect = request.nextUrl.clone()
   loginRedirect.pathname = '/login'
 
-  if (!formData) {
-    loginRedirect.searchParams.set('next', '/dashboard')
-    loginRedirect.searchParams.set('error', 'Ungültige Anfrage.')
-    return NextResponse.redirect(loginRedirect, { status: 303 })
-  }
+  try {
+    const formData = await request.formData().catch(() => null)
 
-  const email = String(formData.get('email') ?? '').trim()
-  const password = String(formData.get('password') ?? '')
-  const nextRaw = String(formData.get('next') ?? '/dashboard') || '/dashboard'
-  const next = nextRaw.startsWith('/') ? nextRaw : '/dashboard'
+    if (!formData) {
+      loginRedirect.searchParams.set('next', '/dashboard')
+      loginRedirect.searchParams.set('error', 'Ungültige Anfrage.')
+      return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
+    }
 
-  loginRedirect.searchParams.set('next', next)
+    const email = String(formData.get('email') ?? '').trim()
+    const password = String(formData.get('password') ?? '')
+    const nextRaw = String(formData.get('next') ?? '/dashboard') || '/dashboard'
+    const next = nextRaw.startsWith('/') ? nextRaw : '/dashboard'
 
-  if (!email || !password) {
-    loginRedirect.searchParams.set('error', 'Bitte E-Mail und Passwort eingeben.')
-    return NextResponse.redirect(loginRedirect, { status: 303 })
-  }
+    loginRedirect.searchParams.set('next', next)
 
-  let response = NextResponse.next({ request: { headers: request.headers } })
-  const admin = createAdminClient()
+    if (!email || !password) {
+      loginRedirect.searchParams.set('error', 'Bitte E-Mail und Passwort eingeben.')
+      return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
+    }
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          try { response.cookies.set({ name, value, ...options }) } catch {}
-        },
-        remove(name: string, options: CookieOptions) {
-          try { response.cookies.set({ name, value: '', ...options, maxAge: 0, expires: new Date(0) }) } catch {}
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+      loginRedirect.searchParams.set('error', 'Server-Konfiguration unvollständig. Supabase-URL oder Anon-Key fehlen.')
+      return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
+    }
+
+    const admin = createAdminClient()
+
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      {
+        cookies: {
+          get(name: string) {
+            return request.cookies.get(name)?.value
+          },
+          set(name: string, value: string, options: CookieOptions) {
+            try { response.cookies.set({ name, value, ...options }) } catch {}
+          },
+          remove(name: string, options: CookieOptions) {
+            try { response.cookies.set({ name, value: '', ...options, maxAge: 0, expires: new Date(0) }) } catch {}
+          },
         },
       },
-    },
-  )
+    )
 
-  try {
     const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,

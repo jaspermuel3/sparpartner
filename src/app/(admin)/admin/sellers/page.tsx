@@ -35,11 +35,12 @@ import {
 import { formatPercent } from '@/lib/constants'
 import { buildQueryString, cn } from '@/lib/utils'
 
-export const metadata = { title: 'Verkäufer · Admin' }
+export const metadata = { title: 'Benutzer · Admin' }
 
 type SortKey =
   | 'name'
   | 'email'
+  | 'role'
   | 'is_active'
   | 'team_name'
   | 'tokens'
@@ -51,6 +52,7 @@ type SortKey =
 const SORT_KEY_TO_FIELD: Record<SortKey, string> = {
   name: 'full_name',
   email: 'email',
+  role: 'role',
   is_active: 'is_active',
   team_name: 'team_name',
   tokens: 'tokens',
@@ -66,6 +68,7 @@ export default async function AdminSellersPage({
   searchParams: {
     q?: string
     team?: string
+    role?: string
     sortBy?: SortKey
     sortDir?: 'asc' | 'desc'
   }
@@ -112,6 +115,11 @@ export default async function AdminSellersPage({
     }
   }
 
+  const roleFilter = searchParams.role
+  if (roleFilter) {
+    rows = rows.filter((s) => s.role === roleFilter)
+  }
+
   const sortBy: SortKey = searchParams.sortBy ?? 'name'
   const sortDir: 'asc' | 'desc' = searchParams.sortDir ?? 'asc'
   const field = SORT_KEY_TO_FIELD[sortBy] ?? 'full_name'
@@ -126,6 +134,10 @@ export default async function AdminSellersPage({
       case 'email':
         av = (a.email ?? '').toString().toLowerCase()
         bv = (b.email ?? '').toString().toLowerCase()
+        break
+      case 'role':
+        av = (a.role ?? '').toString().toLowerCase()
+        bv = (b.role ?? '').toString().toLowerCase()
         break
       case 'is_active':
         av = a.is_active ? 1 : 0
@@ -171,11 +183,11 @@ export default async function AdminSellersPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Verkäufer verwalten"
+        title="Benutzer verwalten"
         description={`${totalCount} Benutzerkonten · ${activeCount} aktiv · ${shownCount} angezeigt`}
         breadcrumb={[
           { label: 'Admin', href: '/admin/dashboard' },
-          { label: 'Verkäufer', href: '/admin/sellers' },
+          { label: 'Benutzer', href: '/admin/sellers' },
         ]}
         actions={
           <>
@@ -190,7 +202,7 @@ export default async function AdminSellersPage({
           <form
             method="GET"
             action="/admin/sellers"
-            className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto] items-end"
+            className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto_auto] items-end"
           >
             <input type="hidden" name="sortBy" value={sortBy} />
             <input type="hidden" name="sortDir" value={sortDir} />
@@ -208,6 +220,19 @@ export default async function AdminSellersPage({
                   className="pl-9"
                 />
               </div>
+            </div>
+            <div className="space-y-1.5 min-w-[160px]">
+              <label htmlFor="role" className="text-xs font-medium text-slate-600">Rolle</label>
+              <select
+                id="role"
+                name="role"
+                defaultValue={searchParams.role ?? ''}
+                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="">Alle Rollen</option>
+                <option value="admin">Admin</option>
+                <option value="seller">Verkäufer</option>
+              </select>
             </div>
             <div className="space-y-1.5 min-w-[200px]">
               <label htmlFor="team" className="text-xs font-medium text-slate-600">Team</label>
@@ -257,7 +282,8 @@ export default async function AdminSellersPage({
                       Alle
                     </div>
                   </TableHead>
-                  <SortableHead label="Verkäufer" sortKey="name" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
+                  <SortableHead label="Benutzer" sortKey="name" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
+                  <SortableHead label="Rolle" sortKey="role" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Status" sortKey="is_active" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Team" sortKey="team_name" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Tokens" align="right" sortKey="tokens" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
@@ -271,16 +297,16 @@ export default async function AdminSellersPage({
               <TableBody>
                 {rows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10}>
+                    <TableCell colSpan={11}>
                       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center m-4">
                         <div className="mb-2 text-slate-400">
                           <UserPlus className="h-5 w-5" />
                         </div>
                         <div className="text-sm font-medium text-slate-800">
-                          Keine Verkäufer gefunden
+                          Keine Benutzer gefunden
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
-                          Passe Filter an oder erstelle einen neuen Verkäufer.
+                          Passe Filter an oder erstelle einen neuen Benutzer.
                         </div>
                       </div>
                     </TableCell>
@@ -346,7 +372,7 @@ function SortableHead({
   sortKey: SortKey
   currentSortBy: SortKey
   currentSortDir: 'asc' | 'desc'
-  searchParams: { q?: string; team?: string }
+  searchParams: { q?: string; team?: string; role?: string }
   align?: 'left' | 'right'
   hidden?: 'md' | 'lg' | 'xl'
 }) {
@@ -390,6 +416,7 @@ function SortableHead({
 
 function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
   const p = seller.perf ?? {}
+  const isAdmin = seller.role === 'admin'
   return (
     <TableRow className="hover:bg-slate-50">
       <TableCell className="w-[44px]">
@@ -417,6 +444,17 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
             <div className="text-xs text-slate-500">{seller.email}</div>
           </div>
         </div>
+      </TableCell>
+      <TableCell>
+        {isAdmin ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[11px] font-medium text-indigo-700">
+            Admin
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 border border-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+            Verkäufer
+          </span>
+        )}
       </TableCell>
       <TableCell>
         {seller.is_active ? (
