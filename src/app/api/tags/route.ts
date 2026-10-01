@@ -1,12 +1,34 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { requireUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    await requireUser()
+    const response = NextResponse.next({ request: { headers: request.headers } })
+    const anonUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    if (!anonUrl || !anonKey) {
+      return NextResponse.json([])
+    }
+    const supabase = createServerClient(anonUrl, anonKey, {
+      cookies: {
+        get(name: string) {
+          return request.cookies.get(name)?.value
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          try { response.cookies.set({ name, value, ...options }) } catch {}
+        },
+        remove(name: string, options: CookieOptions) {
+          try { response.cookies.set({ name, value: '', ...options, maxAge: 0, expires: new Date(0) }) } catch {}
+        },
+      },
+    })
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json([])
+    }
     const admin = createAdminClient()
     const { data } = await admin
       .from('tags')
