@@ -54,7 +54,8 @@ export function CreateSellerDialog({ teams }: { teams?: any[] }) {
         <DialogHeader>
           <DialogTitle>Neuer Benutzer</DialogTitle>
           <DialogDescription>
-            Benutzerkonto mit gewählter Rolle anlegen. Ein Token-Wallet wird automatisch erstellt.
+            Benutzerkonto mit gewählter Rolle anlegen. Eine Einladungs-E-Mail wird automatisch versandt.
+            Ein Token-Wallet wird automatisch erstellt.
           </DialogDescription>
         </DialogHeader>
         <form action={formAction} className="space-y-3">
@@ -76,12 +77,16 @@ export function CreateSellerDialog({ teams }: { teams?: any[] }) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Initial-Passwort</Label>
-              <Input name="password" type="text" required minLength={6} defaultValue="Seller1234!" />
-            </div>
-            <div className="space-y-1.5">
               <Label>E-Mail</Label>
               <Input name="email" type="email" required placeholder="max@unternehmen.de" />
+            </div>
+            <div className="sm:col-span-2 space-y-1.5">
+              <div className="rounded-lg border border-blue-100 bg-blue-50/50 px-3 py-2 text-xs text-blue-700 flex items-start gap-2">
+                <svg className="h-4 w-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+                <span>Der Empfänger erhält eine Einladung per E-Mail und kann sein Passwort selbst festlegen.</span>
+              </div>
             </div>
             <div className="sm:col-span-2 space-y-1.5">
               <Label>Startguthaben (Tokens)</Label>

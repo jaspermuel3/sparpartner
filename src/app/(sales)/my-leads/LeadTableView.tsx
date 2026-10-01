@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import Link from 'next/link'
 import {
   Table,
@@ -36,6 +36,9 @@ import {
   ArrowUpRight,
   AlertCircle,
   Layers,
+  Check,
+  X,
+  Pencil,
 } from 'lucide-react'
 import { LeadAvatar } from '@/components/ui-custom/LeadAvatar'
 import { LeadStatusBadge } from '@/components/ui-custom/StatusBadges'
@@ -53,6 +56,9 @@ import type { Lead, LeadStatus, ProductType } from '@/types'
 import { Suspense } from 'react'
 import { SkeletonShimmer } from '@/components/ui-custom/SkeletonShimmer'
 import { useRouter } from 'next/navigation'
+import { useFormState } from 'react-dom'
+import { updateLeadInlineAction } from '@/app/actions'
+import { useActionFeedback } from '@/components/ui-custom/FormHelpers'
 
 type LeadLike = Lead & { email?: string | null; phone?: string | null }
 
@@ -243,7 +249,7 @@ export function LeadTableView({
           </TableHeader>
           <TableBody>
             {data.length === 0 && (
-              <TableRow>
+              <TableRow className="stagger-item" style={{ animationDelay: '80ms' }}>
                 <TableCell colSpan={ALL_COLUMNS.filter((c) => colVisible(c.id)).length + 2}>
                   <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center">
                     <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400">
@@ -257,12 +263,17 @@ export function LeadTableView({
                 </TableCell>
               </TableRow>
             )}
-            {data.map((lead) => {
+            {data.map((lead, idx) => {
               const leadAny = lead as any
               const ageDays = formatDaysSince(leadAny.assigned_at ?? lead.created_at)
               const isDup = duplicates.has(lead.id)
+              const staggerDelay = Math.min(600, 60 + idx * 45)
               return (
-                <TableRow key={lead.id} className="group relative">
+                <TableRow
+                  key={lead.id}
+                  className="group relative crm-row-hover stagger-item"
+                  style={{ animationDelay: `${staggerDelay}ms` }}
+                >
                   <TableCell className="px-3 sm:px-4 py-3 align-top">
                     <div className="relative">
                       <LeadAvatar firstName={lead.first_name} lastName={lead.last_name} size="md" className="h-9 w-9" />
@@ -278,11 +289,19 @@ export function LeadTableView({
                   </TableCell>
                   {colVisible('name') && (
                     <TableCell className="py-3 align-top">
-                      <Link href={`/leads/${lead.id}`} className="block min-w-0 pr-4">
+                      <div className="block min-w-0 pr-4">
                         <div className="flex items-center gap-2">
-                          <div className="font-medium text-slate-900 group-hover:text-slate-950 truncate">
-                            {lead.first_name} {lead.last_name}
-                          </div>
+                          <InlineEditCell
+                            leadId={lead.id}
+                            field="name"
+                            value={`${lead.first_name ?? ''} ${lead.last_name ?? ''}`.trim()}
+                            splitFields={['first_name', 'last_name']}
+                            trigger={
+                              <div className="font-medium text-slate-900 group-hover:text-slate-950 truncate cursor-text">
+                                {lead.first_name} {lead.last_name}
+                              </div>
+                            }
+                          />
                           {isDup ? (
                             <span className="inline-flex items-center gap-0.5 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
                               <AlertCircle className="h-2.5 w-2.5" />
@@ -291,12 +310,33 @@ export function LeadTableView({
                           ) : null}
                         </div>
                         {lead.email ? (
-                          <div className="mt-0.5 truncate max-w-[280px] text-xs text-slate-500">{lead.email}</div>
+                          <div className="mt-0.5 max-w-[280px]">
+                            <InlineEditCell
+                              leadId={lead.id}
+                              field="email"
+                              value={lead.email ?? ''}
+                              inputType="email"
+                              trigger={
+                                <div className="truncate text-xs text-slate-500 cursor-text">{lead.email}</div>
+                              }
+                            />
+                          </div>
                         ) : null}
                         {lead.phone ? (
-                          <div className="mt-0.5 text-xs text-slate-500 tabular-nums">{formatPhone(lead.phone)}</div>
+                          <div className="mt-0.5">
+                            <InlineEditCell
+                              leadId={lead.id}
+                              field="phone"
+                              value={lead.phone ?? ''}
+                              inputType="tel"
+                              renderValue={(v) => formatPhone(v)}
+                              trigger={
+                                <div className="text-xs text-slate-500 tabular-nums cursor-text">{formatPhone(lead.phone)}</div>
+                              }
+                            />
+                          </div>
                         ) : null}
-                      </Link>
+                      </div>
                     </TableCell>
                   )}
                   {colVisible('product') && (
@@ -306,7 +346,7 @@ export function LeadTableView({
                   )}
                   {colVisible('status') && (
                     <TableCell className="py-3 align-top">
-                      <LeadStatusBadge status={lead.status as LeadStatus} />
+                      <LeadStatusBadge status={lead.status as LeadStatus} showPop={false} />
                     </TableCell>
                   )}
                   {colVisible('age') && (
@@ -395,6 +435,212 @@ export function LeadTableView({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+type InlineField = 'name' | 'first_name' | 'last_name' | 'phone' | 'email'
+
+function InlineEditCell({
+  leadId,
+  field,
+  value,
+  trigger,
+  splitFields,
+  inputType = 'text',
+  renderValue,
+}: {
+  leadId: string
+  field: InlineField
+  value: string
+  trigger: React.ReactNode
+  splitFields?: [string, string]
+  inputType?: 'text' | 'email' | 'tel'
+  renderValue?: (v: string) => string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const [validState, setValidState] = useState<'idle' | 'valid' | 'invalid'>('idle')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+
+  const [state, formAction] = useFormState(async (_prev: any, fd: FormData) => {
+    const res = (await updateLeadInlineAction(fd)) as any
+    return res
+  }, null)
+  useActionFeedback(state, { quiet: true })
+
+  useEffect(() => {
+    if (editing) {
+      setDraft(value)
+      setValidState('idle')
+      requestAnimationFrame(() => {
+        inputRef.current?.focus()
+        inputRef.current?.select()
+      })
+    }
+  }, [editing, value])
+
+  useEffect(() => {
+    if (!editing) return
+    function handler(e: MouseEvent) {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setEditing(false)
+      }
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setEditing(false)
+    }
+    document.addEventListener('mousedown', handler)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', handler)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [editing])
+
+  function validate(v: string): boolean {
+    if (inputType === 'email') {
+      const ok = v === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
+      setValidState(v === '' ? 'idle' : ok ? 'valid' : 'invalid')
+      return ok
+    }
+    if (inputType === 'tel') {
+      const digits = v.replace(/\D/g, '').length
+      const ok = v === '' || digits >= 6
+      setValidState(v === '' ? 'idle' : ok ? 'valid' : 'invalid')
+      return ok
+    }
+    if (field === 'name' || field === 'first_name' || field === 'last_name') {
+      const trimmed = v.trim()
+      if (splitFields) {
+        const parts = trimmed.split(/\s+/).filter(Boolean)
+        const ok = parts.length >= 1
+        setValidState(trimmed === '' ? 'idle' : ok ? 'valid' : 'invalid')
+        return ok
+      }
+      const ok = trimmed.length > 0
+      setValidState(trimmed === '' ? 'idle' : ok ? 'valid' : 'invalid')
+      return ok
+    }
+    setValidState('idle')
+    return true
+  }
+
+  function handleSave() {
+    if (!validate(draft)) return
+    const fd = new FormData()
+    fd.append('leadId', leadId)
+    if (splitFields) {
+      const parts = draft.trim().split(/\s+/)
+      const f = parts[0] ?? ''
+      const l = parts.slice(1).join(' ')
+      // Zweistufig: two individual calls
+      const fd1 = new FormData()
+      fd1.append('leadId', leadId)
+      fd1.append('field', splitFields[0])
+      fd1.append('value', f)
+      updateLeadInlineAction(fd1)
+        .then(() => {
+          const fd2 = new FormData()
+          fd2.append('leadId', leadId)
+          fd2.append('field', splitFields[1])
+          fd2.append('value', l)
+          return updateLeadInlineAction(fd2)
+        })
+        .then(() => {
+          setValidState('valid')
+          setTimeout(() => setEditing(false), 180)
+        })
+    } else {
+      fd.append('field', field)
+      fd.append('value', draft)
+      formAction(fd)
+      setValidState('valid')
+      setTimeout(() => setEditing(false), 180)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div
+        onDoubleClick={() => setEditing(true)}
+        className="group/inline-edit"
+        title="Doppelklick zum Bearbeiten"
+      >
+        <div className="flex items-center gap-1">
+          {trigger}
+          <button
+            type="button"
+            aria-label="Bearbeiten"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setEditing(true)
+            }}
+            className="opacity-0 group-hover/inline-edit:opacity-100 transition-opacity inline-flex h-6 w-6 items-center justify-center rounded-md border border-transparent text-slate-400 hover:border-slate-200 hover:bg-white hover:text-slate-700"
+          >
+            <Pencil className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div ref={wrapperRef} className="relative w-full max-w-[320px] fade-slide-up">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault()
+          handleSave()
+        }}
+        className="flex items-center gap-1"
+      >
+        <input
+          ref={inputRef}
+          type={inputType}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value)
+            validate(e.target.value)
+          }}
+          className={cn(
+            'w-full h-8 rounded-md border px-2 text-xs outline-none transition-all',
+            'bg-white text-slate-900 shadow-sm',
+            validState === 'valid' && 'field-valid',
+            validState === 'invalid' && 'field-invalid',
+            validState === 'idle' && 'border-slate-300 focus:border-slate-500 focus:ring-2 focus:ring-slate-950/10',
+          )}
+          placeholder={inputType === 'email' ? 'name@domain.de' : inputType === 'tel' ? '+49 ...' : 'Wert eingeben…'}
+          onClick={(e) => e.stopPropagation()}
+        />
+        <button
+          type="submit"
+          aria-label="Speichern"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+          onClick={(e) => {
+            e.stopPropagation()
+          }}
+        >
+          <Check className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          aria-label="Abbrechen"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          onClick={(e) => {
+            e.stopPropagation()
+            setEditing(false)
+          }}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </form>
+      {renderValue ? null : inputType === 'email' && validState === 'invalid' ? (
+        <div className="mt-0.5 text-[10px] text-red-600">Ungültige E-Mail-Adresse</div>
+      ) : inputType === 'tel' && validState === 'invalid' ? (
+        <div className="mt-0.5 text-[10px] text-red-600">Mind. 6 Ziffern erforderlich</div>
+      ) : null}
     </div>
   )
 }

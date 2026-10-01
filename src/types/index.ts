@@ -44,6 +44,7 @@ export type AuditActionType =
   | 'LEAD_CREATED'
   | 'LEAD_RESET'
   | 'LEAD_HOLD_UPDATED'
+  | 'LEAD_UPDATED'
   | 'STATUS_CHANGED'
   | 'TOKEN_DEBIT'
   | 'TOKEN_CREDIT'

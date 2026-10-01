@@ -4,17 +4,38 @@ import type { DatabaseUser, Lead, LeadStatus } from '@/types'
 import { getUserEmailMap, withEmail } from '../user-emails'
 
 export async function createSeller(
-  input: { email: string; password: string; full_name: string; initial_balance?: number; role?: 'admin' | 'seller' },
+  input: { email: string; password?: string; full_name: string; initial_balance?: number; role?: 'admin' | 'seller' },
   createdBy: string,
 ): Promise<{ userId: string }> {
   const admin = createAdminClient()
-  const { data: authData, error: authErr } = await admin.auth.admin.createUser({
-    email: input.email,
-    password: input.password,
-    email_confirm: true,
-  })
+
+  let authData: { user: any }
+  let authErr: any = null
+
+  if (input.password) {
+    const res = await admin.auth.admin.createUser({
+      email: input.email,
+      password: input.password,
+      email_confirm: true,
+    })
+    authData = res.data as any
+    authErr = res.error
+    if (!authErr) {
+      const { error: inviteErr } = await admin.auth.admin.inviteUserByEmail(input.email)
+      if (inviteErr) authErr = inviteErr
+    }
+  } else {
+    const res = await admin.auth.admin.inviteUserByEmail(input.email, {
+      data: {
+        full_name: input.full_name,
+      },
+    })
+    authData = res.data as any
+    authErr = res.error
+  }
+
   if (authErr) throw authErr
-  if (!authData.user) throw new Error('AUTH_CREATE_FAILED')
+  if (!authData?.user) throw new Error('AUTH_CREATE_FAILED')
 
   const role = input.role ?? 'seller'
 

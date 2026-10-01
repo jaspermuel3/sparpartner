@@ -228,6 +228,37 @@ export async function updateLeadNotesAction(formData: FormData) {
   }
 }
 
+export async function updateLeadInlineAction(formData: FormData) {
+  try {
+    const leadId = String(formData.get('leadId'))
+    const field = String(formData.get('field') ?? '')
+    const rawValue = String(formData.get('value') ?? '')
+    const user = await requireUser()
+    const allowedFields = ['first_name', 'last_name', 'phone', 'email', 'notes', 'street', 'zip', 'city']
+    if (!allowedFields.includes(field)) return { error: 'Ungültiges Feld.' }
+
+    await getLeadWithDetails(leadId, user.id, user.role)
+    const admin = createAdminClient()
+    const patch: any = {}
+    if (field === 'phone' || field === 'email' || field === 'street' || field === 'city') {
+      patch[field] = rawValue || null
+    } else if (field === 'zip') {
+      patch.zip = rawValue || null
+    } else {
+      patch[field] = rawValue
+    }
+    const { error } = await admin.from('leads').update(patch).eq('id', leadId)
+    if (error) throw error
+    await logAudit(user.id, 'LEAD_UPDATED', 'lead', leadId, { field, value: rawValue })
+    revalidatePath(`/leads/${leadId}`)
+    revalidatePath('/my-leads')
+    revalidatePath('/admin/leads')
+    return { ok: true, saveLabel: `${field} aktualisiert` }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
 export async function addContactAttemptAction(formData: FormData) {
   try {
     const leadId = String(formData.get('leadId'))
@@ -298,7 +329,8 @@ export async function createSellerAction(formData: FormData) {
   try {
     const adminUser = await requireAdmin()
     const email = String(formData.get('email'))
-    const password = String(formData.get('password'))
+    const passwordRaw = formData.get('password')
+    const password = passwordRaw ? String(passwordRaw) : undefined
     const full_name = String(formData.get('full_name'))
     const initial_balance_raw = Number(formData.get('initial_balance') ?? 0) || 0
     const role_raw = formData.get('role') ? String(formData.get('role')) : 'seller'

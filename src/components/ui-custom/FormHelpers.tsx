@@ -2,6 +2,7 @@
 
 import { useFormState, useFormStatus } from 'react-dom'
 import { toast } from 'sonner'
+import { CheckCircle2 } from 'lucide-react'
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
@@ -13,7 +14,34 @@ export interface ActionResult {
   [key: string]: unknown
 }
 
-export function useActionFeedback(result: ActionResult | null) {
+let savePillMounted = false
+
+function ensureSavePillRoot(): HTMLDivElement {
+  let root = document.getElementById('crm-save-pill-root') as HTMLDivElement | null
+  if (!root) {
+    root = document.createElement('div')
+    root.id = 'crm-save-pill-root'
+    root.className =
+      'pointer-events-none fixed top-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col items-center gap-2'
+    document.body.appendChild(root)
+  }
+  return root
+}
+
+export function showSaveIndicator(label = 'Gespeichert') {
+  if (typeof document === 'undefined') return
+  const root = ensureSavePillRoot()
+  const pill = document.createElement('div')
+  pill.className =
+    'save-pill pointer-events-none inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/95 backdrop-blur px-3.5 py-1.5 text-xs font-medium text-emerald-700 shadow-lg shadow-emerald-900/10'
+  pill.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500"><polyline points="20 6 9 17 4 12"/></svg><span>${label.replace(/"/g, '&quot;')}</span>`
+  root.appendChild(pill)
+  setTimeout(() => {
+    pill.remove()
+  }, 1700)
+}
+
+export function useActionFeedback(result: ActionResult | null, opts?: { saveLabel?: string; quiet?: boolean }) {
   const router = useRouter()
   useEffect(() => {
     if (!result) return
@@ -41,13 +69,16 @@ export function useActionFeedback(result: ActionResult | null) {
           toast(title, { description: toastDesc })
         }
       } else if (result.ok) {
-        toast.success('Erfolgreich gespeichert')
+        if (!opts?.quiet) toast.success('Erfolgreich gespeichert')
+        showSaveIndicator(opts?.saveLabel ?? 'Gespeichert')
+      } else if (!opts?.quiet && result.ok !== false) {
+        showSaveIndicator(opts?.saveLabel ?? 'Gespeichert')
       }
       if (result.redirectTo && typeof result.redirectTo === 'string') {
         router.push(result.redirectTo)
       }
     }
-  }, [result, router])
+  }, [result, router, opts?.quiet, opts?.saveLabel])
 }
 
 export function SubmitButton({

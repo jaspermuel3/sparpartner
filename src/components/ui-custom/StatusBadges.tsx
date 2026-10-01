@@ -1,3 +1,5 @@
+'use client'
+
 import { Badge } from '@/components/ui/badge'
 import type { LeadStatus, CallbackStatus, ContactResult } from '@/types'
 import {
@@ -8,15 +10,24 @@ import {
   CONTACT_RESULT_COLORS,
 } from '@/lib/constants'
 import { cn } from '@/lib/utils'
+import { useEffect, useState } from 'react'
 
-export function LeadStatusBadge({ status }: { status: LeadStatus }) {
+export function LeadStatusBadge({ status, showPop }: { status: LeadStatus; showPop?: boolean }) {
   const label = LEAD_STATUS_LABELS[status] ?? status
   const cls = LEAD_STATUS_CLASSES[status] ?? ''
+  const [popKey, setPopKey] = useState(0)
+
+  useEffect(() => {
+    setPopKey((k) => k + 1)
+  }, [status])
+
   return (
     <span
+      key={`${status}-${popKey}`}
       className={cn(
-        'inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium',
+        'inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium transition-[transform,opacity] duration-200',
         cls,
+        showPop !== false && 'status-pop',
       )}
     >
       {label}

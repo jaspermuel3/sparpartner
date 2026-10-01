@@ -104,7 +104,9 @@ export function Sidebar({
           )}
         >
           <MobileHeader nav={nav} fullName={fullName} email={email} role={role} walletBalance={walletBalance} />
-          {children}
+          <div key={pathname} className="page-transition-in flex-1 w-full">
+            {children}
+          </div>
         </div>
       </div>
     </div>
@@ -210,18 +212,28 @@ function DesktopNav({
               key={item.href}
               href={item.href}
               className={cn(
-                'group flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors',
+                'group flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors duration-200',
                 collapsed ? 'justify-center px-1.5 h-11' : 'px-3',
                 active
-                  ? 'bg-slate-900 text-white shadow-sm'
+                  ? 'bg-slate-900 text-white shadow-sm sidebar-link-active'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
               )}
               aria-label={collapsed ? item.label : undefined}
             >
               <Icon
-                className={cn('h-5 w-5 shrink-0', active ? 'text-white' : 'text-slate-400 group-hover:text-slate-600')}
+                className={cn(
+                  'h-5 w-5 shrink-0 transition-transform duration-200',
+                  active ? 'text-white scale-105' : 'text-slate-400 group-hover:text-slate-600 group-hover:scale-105',
+                )}
               />
-              {!collapsed && item.label}
+              {!collapsed && (
+                <span className={cn(
+                  'transition-all duration-200',
+                  active ? 'translate-x-0.5' : '',
+                )}>
+                  {item.label}
+                </span>
+              )}
             </Link>
           )
           if (!collapsed) return body

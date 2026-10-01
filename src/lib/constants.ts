@@ -90,6 +90,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditActionType, string> = {
   LEAD_CREATED: 'Lead manuell angelegt',
   LEAD_RESET: 'Lead zurückgesetzt',
   LEAD_HOLD_UPDATED: 'Lead-Hold-Status geändert',
+  LEAD_UPDATED: 'Lead bearbeitet',
   STATUS_CHANGED: 'Status geändert',
   TOKEN_DEBIT: 'Token abgebucht',
   TOKEN_CREDIT: 'Token gutgeschrieben',
