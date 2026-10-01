@@ -1,0 +1,753 @@
+'use server'
+
+import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
+import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
+import { requireUser, requireAdmin, requireSeller } from '@/lib/auth'
+import {
+  requestLead,
+  updateLeadStatus as svcUpdateLeadStatus,
+  updateLeadNotes as svcUpdateLeadNotes,
+  addContactAttempt as svcAddContactAttempt,
+  createCallback as svcCreateCallback,
+  updateCallbackStatus as svcUpdateCallbackStatus,
+  getLeadWithDetails,
+  addToWaitlist as svcAddToWaitlist,
+  removeFromWaitlist as svcRemoveFromWaitlist,
+} from '@/lib/services/leads.service'
+import type { ProductType } from '@/types'
+import {
+  creditTokens as svcCreditTokens,
+  debitTokens as svcDebitTokens,
+} from '@/lib/services/tokens.service'
+import {
+  createSeller as svcCreateSeller,
+  updateSeller as svcUpdateSeller,
+  resetSellerPassword as svcResetSellerPassword,
+  adminAssignLeadToSeller,
+  adminResetLead,
+  adminCreateLead,
+  toggleLeadHold,
+  createCampaign,
+  updateCampaign,
+} from '@/lib/services/admin.service'
+import { logAudit } from '@/lib/audit'
+
+const mapError = (err: unknown): { error: string } => {
+  let msg: string
+  if (err instanceof Error) {
+    msg = err.message
+  } else if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as any).message === 'string') {
+    msg = (err as any).message
+  } else {
+    try {
+      msg = typeof err === 'string' ? err : JSON.stringify(err)
+    } catch {
+      msg = String(err)
+    }
+    if (msg === '[object Object]') msg = 'Unbekannter Fehler.'
+  }
+  const map: Record<string, string> = {
+    NOT_ENOUGH_TOKENS: 'Nicht genügend Tokens.',
+    NO_LEAD_AVAILABLE: 'Aktuell ist kein Lead verfügbar. Du kannst dich auf die Warteliste setzen lassen.',
+    NO_WALLET: 'Token-Wallet nicht gefunden.',
+    WALLET_NOT_FOUND: 'Token-Wallet nicht gefunden.',
+    UNAUTHENTICATED: 'Bitte melde dich erneut an.',
+    FORBIDDEN: 'Zugriff verweigert.',
+    USER_INACTIVE: 'Dein Account ist deaktiviert.',
+    LEAD_NOT_FOUND: 'Lead nicht gefunden.',
+    ALREADY_ASSIGNED: 'Lead ist bereits zugewiesen.',
+    AMOUNT_MUST_BE_POSITIVE: 'Betrag muss größer 0 sein.',
+    AUTH_CREATE_FAILED: 'Benutzer konnte nicht erstellt werden. (E-Mail evtl. bereits registriert?)',
+    WAITLIST_INSERT_FAILED: 'Konnte nicht zur Warteliste hinzugefügt werden.',
+  }
+  return { error: map[msg] ?? msg }
+}
+
+export async function loginAction(formData: FormData) {
+  const email = String(formData.get('email') ?? '')
+  const password = String(formData.get('password') ?? '')
+  const next = String(formData.get('next') ?? '/dashboard')
+
+  try {
+    const supabase = createClient()
+    const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) {
+      return { error: 'E-Mail oder Passwort ist falsch.' }
+    }
+
+    // WICHTIG! Bei @supabase/ssr muss die Session explizit via setSession()
+    // persistiert werden, damit der Cookie-Adapter die Auth-Cookies schreibt.
+    if (signInData?.session) {
+      const { error: setErr } = await supabase.auth.setSession({
+        access_token: signInData.session.access_token,
+        refresh_token: signInData.session.refresh_token,
+      })
+      if (setErr) {
+        return { error: 'Sitzung konnte nicht gespeichert werden: ' + setErr.message }
+      }
+    }
+
+    const admin = createAdminClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { error: 'Benutzer nicht gefunden.' }
+
+    const { data: dbUser } = await admin
+      .from('users')
+      .select('is_active, role')
+      .eq('id', user.id)
+      .limit(1)
+      .maybeSingle()
+
+    if (!dbUser) {
+      await supabase.auth.signOut()
+      return { error: 'Benutzerprofil nicht gefunden.' }
+    }
+    if (!dbUser.is_active) {
+      await supabase.auth.signOut()
+      return { error: 'Dein Account ist deaktiviert. Bitte kontaktiere den Admin.' }
+    }
+
+    // KEIN redirect() hier! useFormState() fängt die NEX_REDIRECT Exception ab
+    // und verhindert so den Redirect. Stattdessen redirectTo zurückgeben
+    // und Client-seitig via useRouter() navigieren.
+    return { redirectTo: next }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function logoutAction(formData?: FormData) {
+  const supabase = createClient()
+  try {
+    await supabase.auth.signOut()
+  } catch {
+    // noop – im Fehlerfall trotzdem weiterleiten
+  }
+  return { redirectTo: '/login' }
+}
+
+export async function requestLeadAction(formData: FormData) {
+  try {
+    const user = await requireSeller()
+    const rawProduct = formData.get('product')?.toString()
+    const product: ProductType | null =
+      rawProduct === 'strom' || rawProduct === 'gas' || rawProduct === 'beides' ? rawProduct : null
+    const lead = await requestLead(user.id, product)
+    await logAudit(user.id, 'LEAD_ASSIGNED', 'lead', lead.id, { via: 'request_lead', product })
+    await logAudit(user.id, 'TOKEN_DEBIT', 'token_wallet', null, { amount: -1, lead_id: lead.id })
+    await svcRemoveFromWaitlist(user.id).catch(() => {})
+    revalidatePath('/dashboard')
+    revalidatePath('/my-leads')
+    revalidatePath('/request-lead')
+    return {
+      ok: true,
+      leadAssigned: true,
+      redirectTo: `/leads/${lead.id}`,
+      toast: {
+        title: 'Lead zugewiesen',
+        description: 'Du wirst direkt zur Lead-Detailseite weitergeleitet.',
+        variant: 'success' as const,
+      },
+    }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function joinWaitlistAction(formData: FormData) {
+  try {
+    const user = await requireSeller()
+    const rawProduct = formData.get('product')?.toString()
+    const product: ProductType | null =
+      rawProduct === 'strom' || rawProduct === 'gas' || rawProduct === 'beides' ? rawProduct : null
+    await svcAddToWaitlist(user.id, product)
+    await logAudit(user.id, 'LEAD_CREATED', 'lead_waitlist', null, { action: 'join', product })
+    revalidatePath('/request-lead')
+    return {
+      ok: true,
+      waitlistJoined: true,
+      toast: {
+        title: 'Auf Warteliste gesetzt',
+        description: product
+          ? `Du wirst benachrichtigt, sobald ein Lead für "${product}" verfügbar ist.`
+          : 'Du wirst benachrichtigt, sobald ein Lead verfügbar ist.',
+        variant: 'success' as const,
+      },
+    }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function leaveWaitlistAction() {
+  try {
+    const user = await requireSeller()
+    await svcRemoveFromWaitlist(user.id)
+    revalidatePath('/request-lead')
+    return {
+      ok: true,
+      toast: {
+        title: 'Von Warteliste entfernt',
+        variant: 'default' as const,
+      },
+    }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function updateLeadStatusAction(formData: FormData) {
+  try {
+    const leadId = String(formData.get('leadId'))
+    const status = String(formData.get('status')) as any
+    const user = await requireUser()
+    await getLeadWithDetails(leadId, user.id, user.role)
+    await svcUpdateLeadStatus(leadId, status, user.id, user.role)
+    revalidatePath(`/leads/${leadId}`)
+    revalidatePath('/my-leads')
+    revalidatePath('/dashboard')
+    revalidatePath('/admin/leads')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function updateLeadNotesAction(formData: FormData) {
+  try {
+    const leadId = String(formData.get('leadId'))
+    const notes = String(formData.get('notes') ?? '')
+    const user = await requireUser()
+    await svcUpdateLeadNotes(leadId, notes, user.id, user.role)
+    revalidatePath(`/leads/${leadId}`)
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function addContactAttemptAction(formData: FormData) {
+  try {
+    const leadId = String(formData.get('leadId'))
+    const result = String(formData.get('result')) as any
+    const dateInput = String(formData.get('date'))
+    const timeInput = String(formData.get('time'))
+    const notes = String(formData.get('notes') ?? '') || null
+
+    const iso = new Date(`${dateInput}T${timeInput}:00`).toISOString()
+    const user = await requireUser()
+    await svcAddContactAttempt({
+      lead_id: leadId,
+      user_id: user.id,
+      attempt_date: iso,
+      result,
+      notes,
+    })
+    revalidatePath(`/leads/${leadId}`)
+    revalidatePath('/dashboard')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function createCallbackAction(formData: FormData) {
+  try {
+    const leadId = String(formData.get('leadId'))
+    const dateInput = String(formData.get('date'))
+    const timeInput = String(formData.get('time'))
+    const notes = String(formData.get('notes') ?? '') || null
+
+    const iso = new Date(`${dateInput}T${timeInput}:00`).toISOString()
+    const user = await requireUser()
+    await svcCreateCallback({
+      lead_id: leadId,
+      user_id: user.id,
+      callback_at: iso,
+      notes,
+    })
+    revalidatePath(`/leads/${leadId}`)
+    revalidatePath('/dashboard')
+    revalidatePath('/callbacks')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function updateCallbackStatusAction(formData: FormData) {
+  try {
+    const id = String(formData.get('callbackId'))
+    const status = String(formData.get('status')) as any
+    const user = await requireUser()
+    await svcUpdateCallbackStatus(id, status, user.id)
+    revalidatePath('/dashboard')
+    revalidatePath('/callbacks')
+    revalidatePath(`/leads/${formData.get('leadId') ?? ''}`)
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+// ADMIN ACTIONS
+
+export async function createSellerAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const email = String(formData.get('email'))
+    const password = String(formData.get('password'))
+    const full_name = String(formData.get('full_name'))
+    const initial_balance_raw = Number(formData.get('initial_balance') ?? 0) || 0
+
+    const res = await svcCreateSeller(
+      { email, password, full_name, initial_balance: initial_balance_raw },
+      adminUser.id,
+    )
+    revalidatePath('/admin/sellers')
+    return { ok: true, userId: res.userId }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function updateSellerAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const userId = String(formData.get('userId'))
+    const full_name = String(formData.get('full_name') ?? '')
+    const patch: any = {}
+    if (full_name) patch.full_name = full_name
+    await svcUpdateSeller(userId, patch, adminUser.id)
+    revalidatePath('/admin/sellers')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function toggleSellerActiveAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const userId = String(formData.get('userId'))
+    const setActive = formData.get('active') === 'true'
+    await svcUpdateSeller(userId, { is_active: setActive }, adminUser.id)
+    revalidatePath('/admin/sellers')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function resetSellerPasswordAction(formData: FormData) {
+  try {
+    await requireAdmin()
+    const userId = String(formData.get('userId'))
+    const password = String(formData.get('password'))
+    await svcResetSellerPassword(userId, password)
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function addTokensToSellerAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const userId = String(formData.get('userId'))
+    const amount = Number(formData.get('amount'))
+    const reason = String(formData.get('reason'))
+    const type = (String(formData.get('type') ?? 'aufladung')) as any
+    await svcCreditTokens(userId, amount, reason, adminUser.id, type)
+    revalidatePath('/admin/sellers')
+    revalidatePath('/admin/tokens')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function subtractTokensFromSellerAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const userId = String(formData.get('userId'))
+    const amount = Number(formData.get('amount'))
+    const reason = String(formData.get('reason'))
+    await svcDebitTokens(userId, amount, reason, adminUser.id, 'korrektur_minus')
+    revalidatePath('/admin/sellers')
+    revalidatePath('/admin/tokens')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function adminAssignLeadAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const leadId = String(formData.get('leadId'))
+    const sellerId = String(formData.get('sellerId'))
+    const debitTokens = formData.get('debitTokens') === 'on' || formData.get('debitTokens') === 'true'
+    await adminAssignLeadToSeller(leadId, sellerId, adminUser.id, debitTokens)
+    revalidatePath('/admin/leads')
+    revalidatePath('/dashboard')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function adminResetLeadAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const leadId = String(formData.get('leadId'))
+    const refund = formData.get('refund') !== 'false'
+    await adminResetLead(leadId, adminUser.id, refund)
+    revalidatePath('/admin/leads')
+    revalidatePath('/admin/tokens')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function updateProfileAction(formData: FormData) {
+  try {
+    const user = await requireUser()
+    const supabase = createClient()
+    const full_name = String(formData.get('full_name') ?? '')
+    const email = String(formData.get('email') ?? '')
+    const password = String(formData.get('password') ?? '')
+    const password_new = String(formData.get('password_new') ?? '')
+
+    if (password && password_new) {
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email: (user as any).auth_email ?? email, password })
+      if (signInErr) return { error: 'Aktuelles Passwort ist falsch.' }
+      const { error: updateErr } = await supabase.auth.updateUser({ password: password_new })
+      if (updateErr) return { error: updateErr.message }
+    }
+
+    const patch: any = {}
+    if (full_name) patch.full_name = full_name
+    if (Object.keys(patch).length > 0) {
+      const admin = createAdminClient()
+      await admin.from('users').update(patch).eq('id', user.id)
+    }
+    revalidatePath('/settings')
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+/* =========================
+   Lead Tags (#51)
+   ========================= */
+
+export async function assignTagToLeadAction(formData: FormData) {
+  try {
+    const user = await requireUser()
+    const leadId = String(formData.get('leadId'))
+    const tagId = String(formData.get('tagId'))
+    // Check lead permission
+    await getLeadWithDetails(leadId, user.id, user.role)
+    const admin = createAdminClient()
+    const { error } = await admin
+      .from('lead_tags')
+      .insert({ lead_id: leadId, tag_id: tagId })
+    if (error && error.code !== '23505') throw error
+    await logAudit(user.id, 'TAG_ASSIGNED', 'lead', leadId, { tag_id: tagId })
+    revalidatePath(`/leads/${leadId}`)
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function removeTagFromLeadAction(formData: FormData) {
+  try {
+    const user = await requireUser()
+    const leadId = String(formData.get('leadId'))
+    const tagId = String(formData.get('tagId'))
+    await getLeadWithDetails(leadId, user.id, user.role)
+    const admin = createAdminClient()
+    await admin.from('lead_tags').delete().eq('lead_id', leadId).eq('tag_id', tagId)
+    revalidatePath(`/leads/${leadId}`)
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function createTagAction(formData: FormData) {
+  try {
+    const user = await requireUser()
+    const name = String(formData.get('name') ?? '').trim()
+    if (!name) return { error: 'Name ist erforderlich.' }
+    const color = String(formData.get('color') ?? '#6366f1')
+    const admin = createAdminClient()
+    const { data, error } = await admin
+      .from('tags')
+      .insert({ name, color, created_by: user.id })
+      .select()
+      .limit(1)
+      .maybeSingle()
+    if (error) {
+      if (error.code === '23505') return { error: 'Ein Tag mit diesem Namen existiert bereits.' }
+      throw error
+    }
+    revalidatePath('/leads')
+    return { ok: true, tagId: (data as any)?.id }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+/* =========================
+   Lead Documents (#46) – Einfache DB-Insert; Storage Upload muss nachgereicht werden.
+   ========================= */
+
+export async function addLeadDocumentAction(formData: FormData) {
+  try {
+    const user = await requireUser()
+    const leadId = String(formData.get('leadId'))
+    const fileName = String(formData.get('file_name') ?? '').trim() || 'Dokument'
+    const size = Number(formData.get('size') ?? 0) || 0
+    const mime = String(formData.get('mime_type') ?? '') || null
+    await getLeadWithDetails(leadId, user.id, user.role)
+    const admin = createAdminClient()
+    const { error } = await admin.from('lead_documents').insert({
+      lead_id: leadId,
+      file_name: fileName,
+      mime_type: mime,
+      size_bytes: size > 0 ? size : null,
+      storage_path: `pending/${leadId}/${encodeURIComponent(fileName)}`,
+      created_by: user.id,
+    })
+    if (error) throw error
+    await logAudit(user.id, 'DOCUMENT_UPLOADED', 'lead', leadId, { file: fileName })
+    revalidatePath(`/leads/${leadId}`)
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function deleteLeadDocumentAction(formData: FormData) {
+  try {
+    const user = await requireUser()
+    const leadId = String(formData.get('leadId'))
+    const docId = String(formData.get('docId'))
+    await getLeadWithDetails(leadId, user.id, user.role)
+    const admin = createAdminClient()
+    await admin.from('lead_documents').delete().eq('id', docId)
+    revalidatePath(`/leads/${leadId}`)
+    return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+/* =========================
+   Notification Preferences (#101)
+   ========================= */
+
+export async function updateNotificationPrefsAction(formData: FormData) {
+  try {
+    const user = await requireUser()
+    const admin = createAdminClient()
+    const on_lead_assigned = formData.get('on_lead_assigned') === 'on'
+    const on_callback_reminder = formData.get('on_callback_reminder') === 'on'
+    const on_newsletter = formData.get('on_newsletter') === 'on'
+    const desktop_enabled = formData.get('desktop_enabled') === 'on'
+
+    await admin
+      .from('notification_preferences')
+      .upsert(
+        {
+          user_id: user.id,
+          on_lead_assigned,
+          on_callback_reminder,
+          on_newsletter,
+          desktop_enabled,
+        },
+        { onConflict: 'user_id' },
+      )
+    revalidatePath('/settings')
+    return {
+      ok: true,
+      toast: { title: 'Einstellungen gespeichert', variant: 'success' as const },
+    }
+  } catch (err) { return mapError(err) }
+}
+
+/* ========= Batch I/K Admin Actions ========= */
+export async function adminCreateLeadAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const input: any = {
+      first_name: String(formData.get('first_name') ?? ''),
+      last_name: String(formData.get('last_name') ?? ''),
+      phone: String(formData.get('phone') ?? ''),
+      email: formData.get('email') ? String(formData.get('email')) : null,
+      street: formData.get('street') ? String(formData.get('street')) : null,
+      zip: formData.get('zip') ? String(formData.get('zip')) : null,
+      city: formData.get('city') ? String(formData.get('city')) : null,
+      product: String(formData.get('product') ?? 'strom') as any,
+      source: String(formData.get('source') ?? 'manual') as any,
+      campaign_id: formData.get('campaign_id') ? String(formData.get('campaign_id')) : null,
+      power_consumption: formData.get('power_consumption'),
+      gas_consumption: formData.get('gas_consumption'),
+      notes: formData.get('notes') ? String(formData.get('notes')) : null,
+    }
+    if (!input.first_name || !input.last_name || !input.phone) return { error: 'Vorname, Nachname und Telefon sind erforderlich.' }
+    const sellerId = formData.get('seller_id') ? String(formData.get('seller_id')) : undefined
+    const debit = formData.get('debitTokens') === 'on' || formData.get('debitTokens') === 'true'
+    const { id } = await adminCreateLead(input, adminUser.id, sellerId, debit)
+    revalidatePath('/admin/leads')
+    return { ok: true, toast: { title: 'Lead angelegt', description: `#${id.slice(0,8)}`, variant: 'success' as const } }
+  } catch (err) { return mapError(err) }
+}
+
+export async function adminToggleHoldAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const leadId = String(formData.get('leadId'))
+    const on = formData.get('is_on_hold') === 'on' || formData.get('is_on_hold') === 'true'
+    const notes = formData.get('hold_notes') ? String(formData.get('hold_notes')) : undefined
+    await toggleLeadHold(leadId, adminUser.id, on, notes)
+    revalidatePath('/admin/leads')
+    return { ok: true }
+  } catch (err) { return mapError(err) }
+}
+
+export async function createCampaignAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const input: any = {
+      name: String(formData.get('name') ?? ''),
+      source: formData.get('source') ? String(formData.get('source')) : null,
+      is_active: formData.get('is_active') === 'on' || formData.get('is_active') === undefined,
+      budget_amount: formData.get('budget_amount') ?? null,
+      start_date: formData.get('start_date') ? String(formData.get('start_date')) : null,
+      end_date: formData.get('end_date') ? String(formData.get('end_date')) : null,
+    }
+    if (!input.name) return { error: 'Name ist erforderlich.' }
+    await createCampaign(input, adminUser.id)
+    revalidatePath('/admin/campaigns')
+    revalidatePath('/admin/stats')
+    return { ok: true }
+  } catch (err) { return mapError(err) }
+}
+
+export async function updateCampaignAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const id = String(formData.get('id'))
+    const patch: any = {}
+    for (const k of ['name','source','is_active','budget_amount','start_date','end_date']) {
+      if (formData.has(k)) {
+        if (k === 'is_active') patch.is_active = formData.get(k) === 'on'
+        else if (k === 'budget_amount') patch.budget_amount = formData.get(k) ? Number(formData.get(k)) : null
+        else patch[k] = formData.get(k) ? String(formData.get(k)) : null
+      }
+    }
+    await updateCampaign(id, patch, adminUser.id)
+    revalidatePath('/admin/campaigns')
+    revalidatePath('/admin/stats')
+    return { ok: true }
+  } catch (err) { return mapError(err) }
+}
+
+/* ========= Batch J/L Admin Seller + Settings Actions ========= */
+export async function bulkCreditTokensAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const idsRaw = String(formData.get('selectedIds') ?? '')
+    const ids = idsRaw.split(',').map((s) => s.trim()).filter(Boolean)
+    const amount = Number(formData.get('amount') ?? 0)
+    const reason = String(formData.get('reason') ?? 'Massen-Aufladung')
+    if (!ids.length) return { error: 'Keine Verkäufer ausgewählt.' }
+    if (amount <= 0) return { error: 'Betrag muss größer 0 sein.' }
+    const { creditTokens } = await import('@/lib/services/tokens.service')
+    for (const id of ids) {
+      try { await creditTokens(id, amount, reason, adminUser.id, 'aufladung') } catch {}
+    }
+    revalidatePath('/admin/sellers')
+    revalidatePath('/admin/tokens')
+    return { ok: true, toast: { title: `${amount}×${ids.length} Tokens gutgeschrieben`, variant: 'success' as const } }
+  } catch (err) { return (typeof (mapError as any) === 'function') ? (mapError as any)(err) : { error: String(err) } }
+}
+
+export async function createTeamAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const name = String(formData.get('name') ?? '').trim()
+    const color = formData.get('color') ? String(formData.get('color')) : null
+    if (!name) return { error: 'Team-Name ist erforderlich.' }
+    const { createTeam } = await import('@/lib/services/teams.service')
+    await createTeam(name, color, adminUser.id)
+    revalidatePath('/admin/sellers')
+    revalidatePath('/admin/settings')
+    return { ok: true }
+  } catch (err) { return (typeof (mapError as any) === 'function') ? (mapError as any)(err) : { error: String(err) } }
+}
+
+export async function updateSellerTeamAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const userId = String(formData.get('userId'))
+    const teamId = formData.get('team_id') ? String(formData.get('team_id')) : null
+    const admin = createAdminClient()
+    await admin.from('users').update({ team_id: teamId }).eq('id', userId)
+    await (logAudit as any)(adminUser.id, 'SELLER_UPDATED', 'user', userId, { team_id: teamId })
+    revalidatePath('/admin/sellers')
+    return { ok: true }
+  } catch (err) { return (typeof (mapError as any) === 'function') ? (mapError as any)(err) : { error: String(err) } }
+}
+
+export async function saveNotifyPrefsAction(formData: FormData) {
+  try {
+    const user = await requireUser()
+    const admin = createAdminClient()
+    const payload = {
+      user_id: user.id,
+      push_callbacks: formData.get('push_callbacks') === 'on',
+      push_leads: formData.get('push_leads') === 'on',
+      push_tokens: formData.get('push_tokens') === 'on',
+      email_summary: formData.get('email_summary') === 'on',
+      email_tokens: formData.get('email_tokens') === 'on',
+    }
+    const { error } = await admin.from('notification_preferences').upsert(payload, { onConflict: 'user_id' })
+    if (error) throw error
+    revalidatePath('/settings')
+    return { ok: true, toast: { title: 'Benachrichtigungen gespeichert', variant: 'success' as const } }
+  } catch (err) { return (typeof (mapError as any) === 'function') ? (mapError as any)(err) : { error: String(err) } }
+}
+
+export async function createSellerWithTeamAction(formData: FormData) {
+  try {
+    const createRes = await createSellerAction(formData) as any
+    if (createRes.error) return createRes
+    if (createRes.ok && createRes.userId) {
+      const teamId = formData.get('team_id') ? String(formData.get('team_id')) : null
+      if (teamId) {
+        const admin = createAdminClient()
+        await admin.from('users').update({ team_id: teamId }).eq('id', createRes.userId)
+      }
+    }
+    revalidatePath('/admin/sellers')
+    return createRes
+  } catch (err) { return (typeof (mapError as any) === 'function') ? (mapError as any)(err) : { error: String(err) } }
+}
+
+export async function updateSellerWithTeamAction(formData: FormData) {
+  try {
+    const updRes = await updateSellerAction(formData) as any
+    if (updRes.error) return updRes
+    await updateSellerTeamAction(formData)
+    return { ok: true }
+  } catch (err) { return (typeof (mapError as any) === 'function') ? (mapError as any)(err) : { error: String(err) } }
+}
