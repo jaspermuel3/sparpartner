@@ -71,16 +71,33 @@ export async function createSeller(
   return { userId: authData.user.id }
 }
 
-export async function updateSeller(userId: string, patch: Partial<Pick<DatabaseUser, 'full_name' | 'is_active' | 'role'>>, updatedBy: string) {
+export async function updateSeller(
+  userId: string,
+  patch: Partial<Pick<DatabaseUser, 'full_name' | 'is_active' | 'role' | 'team_id' | 'phone' | 'notes' | 'deactivation_reason'>>,
+  updatedBy: string,
+  reason?: string,
+) {
   const admin = createAdminClient()
   const { data: old } = await admin.from('users').select('*').eq('id', userId).maybeSingle()
   if (!old) throw new Error('USER_NOT_FOUND')
+
+  // Letzter-Admin-Schutz bei Deaktivieren / Downgrade / Delete
+  if (
+    (patch.is_active === false && (old as DatabaseUser).role === 'admin') ||
+    (patch.role === 'seller' && (old as DatabaseUser).role === 'admin' && (old as DatabaseUser).is_active)
+  ) {
+    const { data: cnt } = await admin.rpc('count_active_admins') as any
+    const n = Number(cnt ?? 0)
+    if (n <= 1) throw new Error('LAST_ADMIN_PROTECTED')
+  }
 
   const { error } = await admin.from('users').update(patch).eq('id', userId)
   if (error) throw error
 
   if (typeof patch.is_active === 'boolean' && patch.is_active !== (old as DatabaseUser).is_active) {
-    await logAudit(updatedBy, patch.is_active ? 'SELLER_ACTIVATED' : 'SELLER_DEACTIVATED', 'user', userId)
+    await logAudit(updatedBy, patch.is_active ? 'SELLER_ACTIVATED' : 'SELLER_DEACTIVATED', 'user', userId, {
+      reason: reason ?? patch.deactivation_reason ?? null,
+    })
   } else {
     await logAudit(updatedBy, 'SELLER_UPDATED', 'user', userId, { patch })
   }
@@ -1344,4 +1361,175 @@ export async function getLandingLeadsWithExtra(filters: LandingLeadFilters = {})
   })
   return { ...list, rows }
 }
+
+/* ============================================================
+   Erweiterte Admin-Benutzerverwaltung (0017)
+   ============================================================ */
+
+export async function countActiveAdmins(): Promise<number> {
+  const admin = createAdminClient()
+  const { data } = await admin.rpc('count_active_admins') as any
+  return Number(data ?? 0)
+}
+
+export async function softDeleteSeller(
+  userId: string,
+  byUserId: string,
+  reason: string = '',
+): Promise<void> {
+  if (userId === byUserId) throw new Error('CANNOT_DELETE_SELF')
+  const admin = createAdminClient()
+  const { error } = await admin.rpc('delete_user', {
+    p_user_id: userId,
+    p_by_user_id: byUserId,
+    p_reason: reason,
+  })
+  if (error) {
+    const code =
+      error.message === 'USER_NOT_FOUND' ||
+      error.message === 'LAST_ADMIN_PROTECTED' ||
+      error.message === 'CANNOT_DELETE_SELF'
+        ? error.message
+        : error.message || 'Löschen fehlgeschlagen.'
+    throw new Error(code)
+  }
+  // Auth-Benutzer sperren (banned_till = Zukunft), damit Login nicht mehr geht
+  try {
+    await admin.auth.admin.updateUserById(userId, {
+      ban_duration: '36500d', // 100 Jahre – praktisch permanent
+    })
+  } catch {
+    // Ignorieren, falls Admin nicht berechtigt oder bereits gesperrt
+  }
+  await logAudit(byUserId, 'SELLER_DELETED', 'user', userId, { reason: reason || 'Kein Grund' })
+}
+
+export async function restoreSeller(userId: string, byUserId: string): Promise<void> {
+  const admin = createAdminClient()
+  const { error } = await admin.rpc('restore_user', {
+    p_user_id: userId,
+    p_by_user_id: byUserId,
+  })
+  if (error) {
+    const code = error.message === 'USER_NOT_FOUND' ? error.message : error.message || 'Wiederherstellung fehlgeschlagen.'
+    throw new Error(code)
+  }
+  // Auth-Ban aufheben
+  try {
+    await admin.auth.admin.updateUserById(userId, { ban_duration: '0s' })
+  } catch {
+    // Ignorieren
+  }
+  await logAudit(byUserId, 'SELLER_RESTORED', 'user', userId)
+}
+
+export async function updateSellerEmail(
+  userId: string,
+  newEmail: string,
+  byUserId: string,
+): Promise<void> {
+  const admin = createAdminClient()
+  const trimmed = newEmail.trim().toLowerCase()
+  if (!/^\S+@\S+\.\S+$/.test(trimmed)) throw new Error('INVALID_EMAIL')
+
+  const { data: userBefore } = await admin
+    .from('users')
+    .select('id, email')
+    .eq('id', userId)
+    .maybeSingle()
+
+  const oldEmail = (userBefore as any)?.email ?? ''
+
+  const { error: authErr } = await admin.auth.admin.updateUserById(userId, {
+    email: trimmed,
+    email_confirm: true,
+  })
+  if (authErr) {
+    if (authErr.message?.toLowerCase().includes('already exists') || authErr.code === 'email_exists') {
+      throw new Error('EMAIL_ALREADY_EXISTS')
+    }
+    throw new Error(authErr.message || 'Auth-Fehler bei E-Mail-Änderung.')
+  }
+
+  await logAudit(byUserId, 'SELLER_EMAIL_CHANGED', 'user', userId, {
+    old_email: oldEmail,
+    new_email: trimmed,
+  })
+}
+
+export interface MagicLinkResult {
+  link: string
+  expires_at: string | null
+}
+
+export async function generateUserMagicLink(userId: string): Promise<MagicLinkResult> {
+  const admin = createAdminClient()
+  const { data, error } = await (admin.auth.admin as any).generateLink?.({
+    type: 'magiclink',
+    user_id: userId,
+  }) ?? { data: null, error: new Error('generateLink not supported') }
+  if (error || !data) {
+    // Fallback: recovery link
+    const { data: userRow } = await admin.from('users').select('email').eq('id', userId).maybeSingle()
+    const email = (userRow as any)?.email
+    if (!email) throw new Error('USER_EMAIL_NOT_FOUND')
+    const fb = await admin.auth.admin.generateLink({
+      type: 'recovery',
+      email,
+    })
+    if (fb.error || !fb.data) throw new Error(fb.error?.message || 'Link-Generierung fehlgeschlagen.')
+    return {
+      link: fb.data.properties.action_link ?? fb.data.properties.email_otp ?? '',
+      expires_at: null,
+    }
+  }
+  return {
+    link: data.properties.action_link ?? data.properties.email_otp ?? '',
+    expires_at: null,
+  }
+}
+
+export async function toggleSellerActiveWithReason(
+  userId: string,
+  byUserId: string,
+  setActive: boolean,
+  reason: string = '',
+): Promise<void> {
+  const admin = createAdminClient()
+  const { error } = await admin.rpc('toggle_user_active', {
+    p_user_id: userId,
+    p_by_user_id: byUserId,
+    p_set_active: setActive,
+    p_reason: reason,
+  })
+  if (error) {
+    const code =
+      error.message === 'USER_NOT_FOUND' || error.message === 'LAST_ADMIN_PROTECTED'
+        ? error.message
+        : error.message || 'Status-Änderung fehlgeschlagen.'
+    throw new Error(code)
+  }
+  await logAudit(byUserId, setActive ? 'SELLER_ACTIVATED' : 'SELLER_DEACTIVATED', 'user', userId, {
+    reason: reason || null,
+  })
+}
+
+export async function bulkDeactivateSellers(
+  userIds: string[],
+  byUserId: string,
+  reason: string = 'Massen-Deaktivierung',
+): Promise<{ ok: number; skipped: string[] }> {
+  const skipped: string[] = []
+  let ok = 0
+  for (const id of userIds) {
+    try {
+      await toggleSellerActiveWithReason(id, byUserId, false, reason)
+      ok++
+    } catch (e: any) {
+      skipped.push(`${id}:${e?.message ?? 'Fehler'}`)
+    }
+  }
+  return { ok, skipped }
+}
+
 

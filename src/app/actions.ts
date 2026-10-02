@@ -34,6 +34,12 @@ import {
   adminSoftDeleteLead,
   requestCancellation as svcRequestCancellation,
   reviewCancellation as svcReviewCancellation,
+  softDeleteSeller as svcSoftDeleteSeller,
+  restoreSeller as svcRestoreSeller,
+  updateSellerEmail as svcUpdateSellerEmail,
+  generateUserMagicLink as svcGenerateMagicLink,
+  toggleSellerActiveWithReason as svcToggleActiveReason,
+  bulkDeactivateSellers as svcBulkDeactivate,
 } from '@/lib/services/admin.service'
 import { logAudit } from '@/lib/audit'
 import {
@@ -81,6 +87,11 @@ const mapError = (err: unknown): { error: string } => {
     ALREADY_REQUESTED: 'Für diesen Lead läuft bereits eine Stornierungsanfrage.',
     REQUEST_NOT_FOUND: 'Anfrage nicht gefunden.',
     ALREADY_REVIEWED: 'Anfrage wurde bereits bearbeitet.',
+    LAST_ADMIN_PROTECTED: 'Dies ist der letzte aktive Admin – Mindestens ein Admin muss aktiv bleiben.',
+    CANNOT_DELETE_SELF: 'Du kannst dich nicht selbst löschen oder deaktivieren.',
+    INVALID_EMAIL: 'Ungültige E-Mail-Adresse.',
+    EMAIL_ALREADY_EXISTS: 'Diese E-Mail wird bereits verwendet.',
+    USER_EMAIL_NOT_FOUND: 'Benutzer hat keine hinterlegte E-Mail.',
   }
   return { error: map[msg] ?? msg }
 }
@@ -397,13 +408,29 @@ export async function updateSellerAction(formData: FormData) {
   try {
     const adminUser = await requireAdmin()
     const userId = String(formData.get('userId'))
-    const full_name = String(formData.get('full_name') ?? '')
+    const full_name_raw = formData.get('full_name')
+    const phone_raw = formData.get('phone')
+    const notes_raw = formData.get('notes')
     const role_raw = formData.get('role') ? String(formData.get('role')) : null
+    const reason = formData.get('reason') ? String(formData.get('reason')) : undefined
+
     const patch: any = {}
-    if (full_name) patch.full_name = full_name
+    if (full_name_raw !== null && full_name_raw !== undefined) {
+      const f = String(full_name_raw).trim()
+      if (f.length) patch.full_name = f
+    }
+    if (phone_raw !== null && phone_raw !== undefined) {
+      const p = String(phone_raw).trim()
+      patch.phone = p.length ? p : null
+    }
+    if (notes_raw !== null && notes_raw !== undefined) {
+      const n = String(notes_raw).trim()
+      patch.notes = n.length ? n : null
+    }
     if (role_raw === 'admin' || role_raw === 'seller') patch.role = role_raw
-    await svcUpdateSeller(userId, patch, adminUser.id)
+    await svcUpdateSeller(userId, patch, adminUser.id, reason)
     revalidatePath('/admin/sellers')
+    revalidatePath(`/admin/sellers/${userId}`)
     return { ok: true }
   } catch (err) {
     return mapError(err)
@@ -415,8 +442,10 @@ export async function toggleSellerActiveAction(formData: FormData) {
     const adminUser = await requireAdmin()
     const userId = String(formData.get('userId'))
     const setActive = formData.get('active') === 'true'
-    await svcUpdateSeller(userId, { is_active: setActive }, adminUser.id)
+    const reason = formData.get('reason') ? String(formData.get('reason')) : ''
+    await svcToggleActiveReason(userId, adminUser.id, setActive, reason)
     revalidatePath('/admin/sellers')
+    revalidatePath(`/admin/sellers/${userId}`)
     return { ok: true }
   } catch (err) {
     return mapError(err)
@@ -1017,4 +1046,100 @@ export async function adminReviewCancellationAction(formData: FormData) {
     return mapError(err)
   }
 }
+
+/* ============================================================
+   Erweiterte Admin-Benutzerverwaltung (0017)
+   ============================================================ */
+
+export async function deleteSellerAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const userId = String(formData.get('userId'))
+    const reason = String(formData.get('reason') ?? '').trim()
+    await svcSoftDeleteSeller(userId, adminUser.id, reason)
+    revalidatePath('/admin/sellers')
+    revalidatePath(`/admin/sellers/${userId}`)
+    return {
+      ok: true,
+      toast: {
+        title: 'Benutzer gelöscht',
+        description: 'Konto wurde deaktiviert und unsichtbar gesetzt.',
+        variant: 'success' as const,
+      },
+    }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function restoreSellerAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const userId = String(formData.get('userId'))
+    await svcRestoreSeller(userId, adminUser.id)
+    revalidatePath('/admin/sellers')
+    revalidatePath(`/admin/sellers/${userId}`)
+    return {
+      ok: true,
+      toast: {
+        title: 'Benutzer wiederhergestellt',
+        description: 'Konto ist wieder sichtbar.',
+        variant: 'success' as const,
+      },
+    }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function updateSellerEmailAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const userId = String(formData.get('userId'))
+    const newEmail = String(formData.get('email') ?? '')
+    await svcUpdateSellerEmail(userId, newEmail, adminUser.id)
+    revalidatePath('/admin/sellers')
+    revalidatePath(`/admin/sellers/${userId}`)
+    return {
+      ok: true,
+      toast: { title: 'E-Mail aktualisiert', variant: 'success' as const },
+    }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function generateMagicLinkAction(formData: FormData) {
+  try {
+    await requireAdmin()
+    const userId = String(formData.get('userId'))
+    const res = await svcGenerateMagicLink(userId)
+    return { ok: true, link: res.link, expires_at: res.expires_at }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function bulkDeactivateAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const idsRaw = String(formData.get('selectedIds') ?? '')
+    const ids = idsRaw.split(',').map((s) => s.trim()).filter(Boolean)
+    const reason = String(formData.get('reason') ?? 'Massen-Deaktivierung')
+    if (!ids.length) return { error: 'Keine Benutzer ausgewählt.' }
+    const r = await svcBulkDeactivate(ids, adminUser.id, reason)
+    revalidatePath('/admin/sellers')
+    return {
+      ok: true,
+      toast: {
+        title: `${r.ok}/${ids.length} deaktiviert`,
+        description: r.skipped.length ? `Fehler: ${r.skipped.length}` : undefined,
+        variant: 'success' as const,
+      },
+    }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
 

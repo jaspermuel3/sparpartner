@@ -67,14 +67,14 @@ export function GlobalNotifiers() {
 
         if (!cancelled) {
           // ====== Punkt 13: Wartelisten-Benachrichtigung ======
-          if (countsRes?.ok && countsRes.data) {
-            const counts = countsRes.data as {
+          if (countsRes?.ok && countsRes.breakdown) {
+            const counts = countsRes.breakdown as {
               total: number
               strom: number
               gas: number
               beides: number
             }
-            const totalAvail = (counts.strom ?? 0) + (counts.gas ?? 0) + (counts.beides ?? 0)
+            const totalAvail = counts.total ?? 0
             const lastTs = lastNotifiedWaitlistRef.current['any:available'] ?? 0
             const debounce = 3 * 60 * 1000
             if (totalAvail > 0 && Date.now() - lastTs > debounce) {
@@ -83,10 +83,12 @@ export function GlobalNotifiers() {
               const t = counts.beides ?? 0
               const s = counts.strom ?? 0
               const g = counts.gas ?? 0
+              const unknown = Math.max(0, totalAvail - (t + s + g))
               const products: string[] = []
               if (t > 0) products.push(`${t}x Beides`)
               if (s > 0) products.push(`${s}x Strom`)
               if (g > 0) products.push(`${g}x Gas`)
+              if (unknown > 0) products.push(`${unknown}x Sonstige`)
 
               const fdWaitlist = new FormData()
               fdWaitlist.append('product', totalAvail === t + s + g ? null as any : (products.join(', ') as any))

@@ -687,6 +687,7 @@ export async function getAvailableLeadCount(product?: ProductType | null): Promi
     .from('leads')
     .select('id', { count: 'exact', head: true })
     .eq('is_deleted', false)
+    .eq('is_on_hold', false)
     .is('assigned_user_id', null)
     .not('status', 'in', '("canceled","wrong_data","no_interest","closed")')
 
@@ -710,6 +711,7 @@ export async function getAvailableLeadCountBreakdown(): Promise<{
     .from('leads')
     .select('id, product', { count: 'exact' })
     .eq('is_deleted', false)
+    .eq('is_on_hold', false)
     .is('assigned_user_id', null)
     .not('status', 'in', '("canceled","wrong_data","no_interest","closed")')
 

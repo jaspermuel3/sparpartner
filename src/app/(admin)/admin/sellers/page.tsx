@@ -22,6 +22,9 @@ import {
   EditSellerDialog,
   ResetPwdDialog,
   BulkTokenButton,
+  DeleteSellerDialog,
+  RestoreSellerDialog,
+  BulkDeactivateButton,
 } from './AdminSellerDialogs'
 import {
   UserPlus,
@@ -31,6 +34,9 @@ import {
   ChevronUp,
   ChevronDown,
   ExternalLink,
+  Clock,
+  Trash2,
+  Undo2,
 } from 'lucide-react'
 import { formatPercent } from '@/lib/constants'
 import { buildQueryString, cn } from '@/lib/utils'
@@ -69,6 +75,7 @@ export default async function AdminSellersPage({
     q?: string
     team?: string
     role?: string
+    status?: string
     sortBy?: SortKey
     sortDir?: 'asc' | 'desc'
   }
@@ -118,6 +125,26 @@ export default async function AdminSellersPage({
   const roleFilter = searchParams.role
   if (roleFilter) {
     rows = rows.filter((s) => s.role === roleFilter)
+  }
+
+  const statusFilter = searchParams.status
+  if (statusFilter) {
+    switch (statusFilter) {
+      case 'active':
+        rows = rows.filter((s) => s.is_active && !s.is_deleted)
+        break
+      case 'inactive':
+        rows = rows.filter((s) => !s.is_active && !s.is_deleted)
+        break
+      case 'deleted':
+        rows = rows.filter((s) => !!s.is_deleted)
+        break
+      case 'all':
+        break
+    }
+  } else {
+    // Default: gelöschte ausblenden
+    rows = rows.filter((s) => !s.is_deleted)
   }
 
   const sortBy: SortKey = searchParams.sortBy ?? 'name'
@@ -177,20 +204,22 @@ export default async function AdminSellersPage({
   })
 
   const totalCount = sellersWithPerf.length
-  const activeCount = sellersWithPerf.filter((s) => s.is_active).length
+  const activeCount = sellersWithPerf.filter((s) => s.is_active && !s.is_deleted).length
+  const deletedCount = sellersWithPerf.filter((s) => !!s.is_deleted).length
   const shownCount = rows.length
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Benutzer verwalten"
-        description={`${totalCount} Benutzerkonten · ${activeCount} aktiv · ${shownCount} angezeigt`}
+        description={`${totalCount} Konten · ${activeCount} aktiv · ${deletedCount} gelöscht · ${shownCount} angezeigt`}
         breadcrumb={[
           { label: 'Admin', href: '/admin/dashboard' },
           { label: 'Benutzer', href: '/admin/sellers' },
         ]}
         actions={
           <>
+            <BulkDeactivateButton disabled={rows.length === 0} />
             <BulkTokenButton disabled={rows.length === 0} />
             <CreateSellerDialog teams={teams} />
           </>
@@ -202,7 +231,7 @@ export default async function AdminSellersPage({
           <form
             method="GET"
             action="/admin/sellers"
-            className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto_auto] items-end"
+            className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto_auto_auto] items-end"
           >
             <input type="hidden" name="sortBy" value={sortBy} />
             <input type="hidden" name="sortDir" value={sortDir} />
@@ -221,7 +250,22 @@ export default async function AdminSellersPage({
                 />
               </div>
             </div>
-            <div className="space-y-1.5 min-w-[160px]">
+            <div className="space-y-1.5 min-w-[140px]">
+              <label htmlFor="status" className="text-xs font-medium text-slate-600">Status</label>
+              <select
+                id="status"
+                name="status"
+                defaultValue={searchParams.status ?? ''}
+                className="flex h-10 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="">Aktiv & Inaktiv</option>
+                <option value="active">Nur Aktiv</option>
+                <option value="inactive">Nur Inaktiv</option>
+                <option value="deleted">Gelöschte</option>
+                <option value="all">Alle inkl. Gelöschte</option>
+              </select>
+            </div>
+            <div className="space-y-1.5 min-w-[140px]">
               <label htmlFor="role" className="text-xs font-medium text-slate-600">Rolle</label>
               <select
                 id="role"
@@ -234,7 +278,7 @@ export default async function AdminSellersPage({
                 <option value="seller">Verkäufer</option>
               </select>
             </div>
-            <div className="space-y-1.5 min-w-[200px]">
+            <div className="space-y-1.5 min-w-[180px]">
               <label htmlFor="team" className="text-xs font-medium text-slate-600">Team</label>
               <select
                 id="team"
@@ -286,18 +330,19 @@ export default async function AdminSellersPage({
                   <SortableHead label="Rolle" sortKey="role" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Status" sortKey="is_active" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Team" sortKey="team_name" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
+                  <SortableHead label="Letzter Login" hidden="md" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} sortKey="name" />
                   <SortableHead label="Tokens" align="right" sortKey="tokens" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Leads" align="right" hidden="md" sortKey="leads" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Abschlüsse" align="right" hidden="lg" sortKey="abschlüsse" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Quote" align="right" hidden="xl" sortKey="quote" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
                   <SortableHead label="Ø Kontakte" align="right" hidden="xl" sortKey="kontakte" currentSortBy={sortBy} currentSortDir={sortDir} searchParams={searchParams} />
-                  <TableHead className="text-right w-[170px]">Aktionen</TableHead>
+                  <TableHead className="text-right w-[210px]">Aktionen</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={11}>
+                    <TableCell colSpan={12}>
                       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center m-4">
                         <div className="mb-2 text-slate-400">
                           <UserPlus className="h-5 w-5" />
@@ -331,13 +376,17 @@ export default async function AdminSellersPage({
     checks.forEach((c) => { if (c.checked) ids.push(c.getAttribute('data-user-id')); });
     const hidden = document.getElementById('bulkSelectedIds');
     if (hidden) hidden.value = ids.join(',');
+    const hidden2 = document.getElementById('bulkSelectedIdsDeactivate');
+    if (hidden2) hidden2.value = ids.join(',');
     const master = document.getElementById('masterToggleSellers');
     if (master && checks.length > 0) {
       const allChecked = Array.from(checks).every((c) => c.checked);
       master.checked = allChecked;
     }
-    const btn = document.querySelector('[data-bulk-token-btn]');
-    if (btn) btn.disabled = ids.length === 0;
+    const btnToken = document.querySelector('[data-bulk-token-btn]');
+    if (btnToken) btnToken.disabled = ids.length === 0;
+    const btnDeact = document.querySelector('[data-bulk-deactivate-btn]');
+    if (btnDeact) btnDeact.disabled = ids.length === 0;
   }
   document.addEventListener('change', (e) => {
     const t = e.target;
@@ -372,7 +421,7 @@ function SortableHead({
   sortKey: SortKey
   currentSortBy: SortKey
   currentSortDir: 'asc' | 'desc'
-  searchParams: { q?: string; team?: string; role?: string }
+  searchParams: { q?: string; team?: string; role?: string; status?: string }
   align?: 'left' | 'right'
   hidden?: 'md' | 'lg' | 'xl'
 }) {
@@ -414,11 +463,29 @@ function SortableHead({
   )
 }
 
+function formatRelativeOrNever(iso: string | null | undefined): string {
+  if (!iso) return 'Nie'
+  const d = new Date(iso).getTime()
+  if (Number.isNaN(d)) return 'Nie'
+  const diffSec = Math.max(0, Math.floor((Date.now() - d) / 1000))
+  if (diffSec < 60) return 'Gerade eben'
+  if (diffSec < 3600) return `vor ${Math.floor(diffSec / 60)} Min.`
+  if (diffSec < 86400) return `vor ${Math.floor(diffSec / 3600)} Std.`
+  if (diffSec < 30 * 86400) return `vor ${Math.floor(diffSec / 86400)} Tg.`
+  return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
 function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
   const p = seller.perf ?? {}
   const isAdmin = seller.role === 'admin'
+  const isDeleted = !!seller.is_deleted
   return (
-    <TableRow className="hover:bg-slate-50/80 group transition-colors">
+    <TableRow
+      className={cn(
+        'hover:bg-slate-50/80 group transition-colors',
+        isDeleted && 'bg-rose-50/20',
+      )}
+    >
       <TableCell className="w-[44px]">
         <label className="flex items-center justify-center h-5 cursor-pointer">
           <input
@@ -430,17 +497,34 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
       </TableCell>
       <TableCell>
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-xs font-semibold text-white">
+          <div
+            className={cn(
+              'flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold text-white',
+              isDeleted
+                ? 'bg-gradient-to-br from-rose-600 to-rose-800'
+                : 'bg-gradient-to-br from-slate-700 to-slate-900',
+            )}
+          >
             {(seller.full_name ?? seller.email ?? '?').slice(0, 1).toUpperCase()}
           </div>
           <div>
-            <Link
-              href={`/admin/sellers/${seller.id}`}
-              className="font-medium text-slate-900 hover:text-indigo-600 inline-flex items-center gap-1"
-            >
-              {seller.full_name ?? 'Kein Name'}
-              <ExternalLink className="h-3 w-3 text-slate-400 opacity-50" />
-            </Link>
+            <div className="flex items-center gap-1.5">
+              <Link
+                href={`/admin/sellers/${seller.id}`}
+                className={cn(
+                  'font-medium hover:text-indigo-600 inline-flex items-center gap-1',
+                  isDeleted ? 'text-rose-800 line-through decoration-rose-300' : 'text-slate-900',
+                )}
+              >
+                {seller.full_name ?? 'Kein Name'}
+                <ExternalLink className="h-3 w-3 text-slate-400 opacity-50" />
+              </Link>
+              {isDeleted && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-1.5 py-0.5 text-[10px] font-medium text-rose-700">
+                  <Trash2 className="h-2.5 w-2.5" /> Gelöscht
+                </span>
+              )}
+            </div>
             <div className="text-xs text-slate-500">{seller.email}</div>
           </div>
         </div>
@@ -457,7 +541,11 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
         )}
       </TableCell>
       <TableCell>
-        {seller.is_active ? (
+        {isDeleted ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[11px] font-medium text-rose-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-rose-500" /> Gelöscht
+          </span>
+        ) : seller.is_active ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Aktiv
           </span>
@@ -483,6 +571,14 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
         ) : (
           <span className="text-[11px] text-slate-400">—</span>
         )}
+      </TableCell>
+      <TableCell className="hidden md:table-cell">
+        <div className="flex items-center gap-1 text-xs text-slate-500">
+          <Clock className="h-3 w-3 text-slate-400" />
+          <span title={seller.last_login_at ? new Date(seller.last_login_at).toLocaleString('de-DE') : 'Nie angemeldet'}>
+            {formatRelativeOrNever(seller.last_login_at)}
+          </span>
+        </div>
       </TableCell>
       <TableCell className="text-right">
         <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-800">
@@ -516,13 +612,20 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
       <TableCell className="hidden xl:table-cell text-right text-sm text-slate-700 tabular-nums">
         {(p.durchschnitt_kontakte ?? 0).toFixed(1)}
       </TableCell>
-      <TableCell className="text-right w-[170px]">
+      <TableCell className="text-right w-[210px]">
         <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-          <TokenDialog seller={seller} mode="add" />
-          <TokenDialog seller={seller} mode="subtract" />
-          <ToggleActiveButton seller={seller} />
-          <EditSellerDialog seller={seller} teams={teams} />
-          <ResetPwdDialog seller={seller} />
+          {isDeleted ? (
+            <RestoreSellerDialog seller={seller} />
+          ) : (
+            <>
+              <TokenDialog seller={seller} mode="add" />
+              <TokenDialog seller={seller} mode="subtract" />
+              <ToggleActiveButton seller={seller} />
+              <EditSellerDialog seller={seller} teams={teams} />
+              <ResetPwdDialog seller={seller} />
+              <DeleteSellerDialog seller={seller} />
+            </>
+          )}
         </div>
       </TableCell>
     </TableRow>

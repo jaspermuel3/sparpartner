@@ -128,6 +128,9 @@ export const AUDIT_ACTION_LABELS: Record<AuditActionType, string> = {
   LEAD_CANCEL_REQUEST: 'Lead-Storno angefordert (Verkäufer)',
   LEAD_CANCEL_APPROVED: 'Lead-Storno genehmigt (Admin)',
   LEAD_CANCEL_REJECTED: 'Lead-Storno abgelehnt (Admin)',
+  SELLER_DELETED: 'Verkäufer gelöscht (Admin)',
+  SELLER_RESTORED: 'Verkäufer wiederhergestellt (Admin)',
+  SELLER_EMAIL_CHANGED: 'Verkäufer E-Mail geändert (Admin)',
 }
 
 export const formatDate = (iso: string | null | undefined): string => {

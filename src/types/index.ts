@@ -54,6 +54,9 @@ export type AuditActionType =
   | 'SELLER_UPDATED'
   | 'SELLER_DEACTIVATED'
   | 'SELLER_ACTIVATED'
+  | 'SELLER_DELETED'
+  | 'SELLER_RESTORED'
+  | 'SELLER_EMAIL_CHANGED'
   | 'ADMIN_CHANGE'
   | 'CONTACT_ATTEMPT'
   | 'CALLBACK_CREATED'
@@ -81,6 +84,13 @@ export interface DatabaseUser {
   team_id: string | null
   created_at: string
   updated_at: string
+  last_login_at: string | null
+  is_deleted: boolean
+  deleted_at: string | null
+  deleted_by: string | null
+  phone: string | null
+  notes: string | null
+  deactivation_reason: string | null
 }
 
 export interface Campaign {
