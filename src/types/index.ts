@@ -128,6 +128,14 @@ export interface Lead {
   token_cost: number
   is_on_hold: boolean
   hold_notes: string | null
+  utm_source: string | null
+  utm_medium: string | null
+  utm_campaign: string | null
+  meta_campaign_id: string | null
+  meta_adset_id: string | null
+  meta_adset_name: string | null
+  meta_form_id: string | null
+  meta_form_name: string | null
   created_at: string
   updated_at: string
 }

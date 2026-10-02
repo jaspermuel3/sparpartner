@@ -115,7 +115,13 @@ export function CreateCampaignDialog({ campaigns }: { campaigns?: any[] }) {
   )
 }
 
-export function EditCampaignDialog({ campaign }: { campaign: any }) {
+export function EditCampaignDialog({
+  campaign,
+  children,
+}: {
+  campaign: any
+  children?: React.ReactNode
+}) {
   const [open, setOpen] = useState(false)
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
     async (_, fd) => {
@@ -130,9 +136,11 @@ export function EditCampaignDialog({ campaign }: { campaign: any }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8">
-          <Pencil className="h-3.5 w-3.5 mr-1" /> Bearbeiten
-        </Button>
+        {children ?? (
+          <Button variant="outline" size="sm" className="h-8">
+            <Pencil className="h-3.5 w-3.5 mr-1" /> Bearbeiten
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

@@ -11,20 +11,53 @@ import type { ProductType } from '@/types'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+type MetaTracking = {
+  campaign_id?: string | null
+  campaign_name?: string | null
+  adset_id?: string | null
+  adset_name?: string | null
+  form_id?: string | null
+  form_name?: string | null
+  platform?: string | null
+}
+
+type UtmTracking = {
+  source?: string | null
+  medium?: string | null
+  campaign?: string | null
+  term?: string | null
+  content?: string | null
+}
+
 type MetaLeadPayload = {
   name: string
   phone: string
   stromverbrauch?: string | null
   plz?: string | null
+  // flache Aliase für Einfachheit in Make.com
+  campaign_id?: string | null
+  campaign_name?: string | null
+  // strukturierte Objekte (bevorzugt, falls gesendet)
+  meta?: MetaTracking | null
+  utm?: UtmTracking | null
+  // legacy flache utm keys (optional, falls Landing-Proxy-Style verwendet wird)
+  utm_source?: string | null
+  utm_medium?: string | null
+  utm_campaign?: string | null
 }
 
-function sanitizeText(raw: string, maxLen = 200): string {
+function sanitizeText(raw: unknown, maxLen = 200): string {
   let s = String(raw ?? '')
   s = s.replace(/<[^>]*>/g, '')
   s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
   s = s.replace(/\uFEFF/g, '').trim()
   if (s.length > maxLen) s = s.slice(0, maxLen)
   return s
+}
+
+function sanitizeNullable(raw: unknown, maxLen = 200): string | null {
+  const s = sanitizeText(raw, maxLen)
+  return s ? s : null
 }
 
 function splitFullName(fullName: string): { first_name: string; last_name: string } {
@@ -85,6 +118,102 @@ function securityHeadersInit(init: ResponseInit = {}): ResponseInit {
 
 function jsonResponse<T>(body: T, init: ResponseInit = {}): NextResponse<T> {
   return NextResponse.json(body, securityHeadersInit(init))
+}
+
+/**
+ * Auto-Upsert der Kampagnen-Zuordnung für Meta-Leads.
+ * Gibt die campaign_id (UUID) zurück, falls einsatzbereit, sonst null.
+ *
+ * Wichtig: Neue Meta-Kampagnen werden IMMER direkt angelegt – auch wenn Meta
+ * keine native campaign_id liefert. Dafür bauen wir eine stabile external_id
+ * aus Kampagnen-Name + UTM, sodass Duplikate ausgeschlossen sind.
+ */
+async function upsertMetaCampaign(
+  admin: ReturnType<typeof createAdminClient>,
+  payload: MetaLeadPayload,
+): Promise<string | null> {
+  const meta = payload.meta ?? {}
+  const rawMetaCampaignId = sanitizeNullable(payload.campaign_id ?? meta.campaign_id, 128)
+  const rawMetaName = sanitizeNullable(payload.campaign_name ?? meta.campaign_name, 200)
+  const utmName = sanitizeNullable(payload.utm?.campaign ?? payload.utm_campaign, 200)
+  const humanName =
+    sanitizeText(rawMetaName ?? utmName ?? 'Meta Lead Ads Kampagne', 200) ||
+    'Meta Lead Ads Kampagne'
+
+  const sourceLabel: any = 'meta_ads'
+
+  // Immer eine stabile external_id bauen (Meta-campaign_id bevorzugt, sonst Hash aus Name+UTM)
+  // => auch "neue" Kampagnen landen IMMER im Upsert und werden automatisch angelegt.
+  let externalId: string | null = rawMetaCampaignId
+  if (!externalId) {
+    const parts: string[] = []
+    if (rawMetaName) parts.push(rawMetaName)
+    if (utmName) parts.push(utmName)
+    if (parts.length > 0) {
+      const raw = parts.join('||')
+      const slug = raw
+        .toLowerCase()
+        .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+        .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 72) || 'untitled'
+      let hash = 2166136261
+      for (let i = 0; i < raw.length; i++) {
+        hash ^= raw.charCodeAt(i)
+        hash = Math.imul(hash, 16777619)
+      }
+      const suffix = (hash >>> 0).toString(16).padStart(8, '0')
+      externalId = `meta::auto::${slug}_${suffix}`
+    }
+  }
+
+  const toUpsert: Record<string, unknown> = {
+    name: humanName,
+    source: sourceLabel,
+    is_active: true,
+  }
+  if (externalId) toUpsert.external_id = externalId
+
+  try {
+    if (externalId) {
+      const { data, error } = await admin
+        .from('campaigns')
+        .upsert(toUpsert, { onConflict: 'external_id', ignoreDuplicates: false })
+        .select('id')
+        .limit(1)
+        .maybeSingle()
+      if (data && !error) return (data as { id: string }).id
+      if (error) {
+        log.warn('META_LEADS', 'Campaign Upsert mit external_id fehlgeschlagen – fallback', { external_id: externalId }, error)
+      }
+    }
+
+    // Fallback: Lookup + Insert (falls Unique-Constraint fehlt oder Upsert blockiert ist)
+    {
+      const lookup = admin
+        .from('campaigns')
+        .select('id')
+        .limit(1)
+      if (externalId) {
+        lookup.or(`external_id.eq.${externalId},and(source.eq.${sourceLabel},name.eq.${humanName})`)
+      } else {
+        lookup.eq('source', sourceLabel as any).eq('name', humanName)
+      }
+      const { data: existing } = await lookup.maybeSingle()
+      if (existing) return (existing as { id: string }).id
+
+      const { data, error } = await admin
+        .from('campaigns')
+        .insert(toUpsert)
+        .select('id')
+        .limit(1)
+        .maybeSingle()
+      if (error || !data) return null
+      return (data as { id: string }).id
+    }
+  } catch (e) {
+    log.warn('META_LEADS', 'Kampagnen-Upsert ist fehlgeschlagen (swallowed)', undefined, e)
+    return null
+  }
 }
 
 export async function OPTIONS(req: Request) {
@@ -206,10 +335,27 @@ export async function POST(req: Request) {
 
     const admin = createAdminClient()
 
+    const meta = body.meta ?? {}
+    const metaCampaignId = sanitizeNullable(body.campaign_id ?? meta.campaign_id, 128)
+    const metaCampaignName = sanitizeNullable(body.campaign_name ?? meta.campaign_name, 200)
+    const metaAdsetId = sanitizeNullable(meta.adset_id, 128)
+    const metaAdsetName = sanitizeNullable(meta.adset_name, 200)
+    const metaFormId = sanitizeNullable(meta.form_id, 128)
+    const metaFormName = sanitizeNullable(meta.form_name, 200)
+    const utmSource = sanitizeNullable(body.utm?.source ?? body.utm_source ?? 'meta', 64)
+    const utmMedium = sanitizeNullable(body.utm?.medium ?? body.utm_medium ?? 'paid_social', 128)
+    const utmCampaign = sanitizeNullable(body.utm?.campaign ?? body.utm_campaign, 200)
+
+    const campaignId = await upsertMetaCampaign(admin, body)
+
     const notesParts: string[] = ['[Meta / Facebook Lead Ads]']
     if (powerConsumption != null) {
       notesParts.push(`Stromverbrauch (Original): ${String(body.stromverbrauch ?? '').trim()}`)
     }
+    if (metaCampaignName) notesParts.push(`Kampagne: ${metaCampaignName}`)
+    if (metaAdsetName) notesParts.push(`Werbegruppe: ${metaAdsetName}`)
+    if (metaFormName) notesParts.push(`Formular: ${metaFormName}`)
+    if (utmCampaign) notesParts.push(`UTM Kampagne: ${utmCampaign}`)
 
     const product: ProductType = 'strom'
 
@@ -224,11 +370,19 @@ export async function POST(req: Request) {
       product,
       power_consumption: powerConsumption,
       gas_consumption: null,
-      campaign_id: null,
+      campaign_id: campaignId,
       notes: notesParts.join('\n'),
       status: 'new',
       token_cost: 1,
       source: 'meta_ads',
+      utm_source: utmSource,
+      utm_medium: utmMedium,
+      utm_campaign: utmCampaign,
+      meta_campaign_id: metaCampaignId,
+      meta_adset_id: metaAdsetId,
+      meta_adset_name: metaAdsetName,
+      meta_form_id: metaFormId,
+      meta_form_name: metaFormName,
     }
 
     let leadId: string | null = null
@@ -282,6 +436,7 @@ export async function POST(req: Request) {
       source: 'meta_ads_api',
       product,
       power_consumption: powerConsumption,
+      campaign_id: campaignId,
     }).catch((e) =>
       log.warn('META_LEADS', 'Audit-Log fehlgeschlagen (swallowed)', undefined, e),
     )
@@ -290,6 +445,7 @@ export async function POST(req: Request) {
       lead_id: leadId,
       source: 'meta_ads',
       plz: cleanPlz || null,
+      campaign_id: campaignId,
     })
 
     return jsonResponse(
@@ -297,6 +453,7 @@ export async function POST(req: Request) {
         status: 'success',
         message: 'Lead saved',
         lead_id: leadId,
+        campaign_id: campaignId,
       },
       { status: 201, headers: rlHeaders },
     )

@@ -33,6 +33,9 @@ import {
   ChevronUp,
   AlertTriangle,
   UserCircle,
+  Megaphone,
+  Boxes,
+  Globe2,
 } from 'lucide-react'
 import {
   assignTagToLeadAction,
@@ -1903,9 +1906,21 @@ export function CompactStatusHistory({
    ========================================================= */
 
 export function SecondaryInfoCard({ lead, campaign }: { lead: any; campaign: any }) {
+  const utmSource = String(lead.utm_source ?? '').trim()
+  const utmMedium = String(lead.utm_medium ?? '').trim()
+  const utmCampaign = String(lead.utm_campaign ?? '').trim()
+  const metaCampaignId = String(lead.meta_campaign_id ?? '').trim()
+  const metaAdsetId = String(lead.meta_adset_id ?? '').trim()
+  const metaAdsetName = String(lead.meta_adset_name ?? '').trim()
+  const metaFormId = String(lead.meta_form_id ?? '').trim()
+  const metaFormName = String(lead.meta_form_name ?? '').trim()
+  const hasUtm = utmSource || utmMedium || utmCampaign
+  const hasMeta = metaCampaignId || metaAdsetId || metaAdsetName || metaFormId || metaFormName
+  const hasTracking = hasUtm || hasMeta
+
   const hasSecondary = Boolean(
     lead.street || lead.zip || lead.city || lead.source || campaign || lead.product ||
-    lead.power_consumption || lead.gas_consumption,
+    lead.power_consumption || lead.gas_consumption || hasTracking,
   )
   if (!hasSecondary) return null
 
@@ -1913,7 +1928,7 @@ export function SecondaryInfoCard({ lead, campaign }: { lead: any; campaign: any
     <details className="group rounded-xl border border-slate-200 bg-white open:bg-slate-50/30 transition-colors">
       <summary className="flex cursor-pointer list-none items-center justify-between px-3.5 py-2.5 select-none">
         <h3 className="text-[11px] font-semibold uppercase tracking-widest text-slate-400 flex items-center gap-1.5">
-          <MapPin className="h-3 w-3" /> Weitere Informationen (Adresse, Produkt, Quelle)
+          <Boxes className="h-3 w-3" /> Weitere Informationen (Adresse, Produkt, Quelle, Tracking)
         </h3>
         <div className="inline-flex h-6 w-6 items-center justify-center rounded-md text-slate-400 group-open:rotate-180 transition-transform">
           <ChevronDown className="h-3.5 w-3.5" />
@@ -1944,12 +1959,25 @@ export function SecondaryInfoCard({ lead, campaign }: { lead: any; campaign: any
           </div>
         )}
         <div className="flex items-start gap-2.5 rounded-lg border border-slate-100 bg-slate-50/50 p-2.5">
-          <UserCircle className="mt-0.5 shrink-0 h-3.5 w-3.5 text-slate-400" />
+          <Megaphone className="mt-0.5 shrink-0 h-3.5 w-3.5 text-slate-400" />
           <div className="min-w-0 flex-1">
             <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Quelle / Kampagne</div>
             <div className="mt-0.5 text-sm text-slate-800 leading-snug">
               <div className="font-medium">{SOURCE_LABELS[lead.source as keyof typeof SOURCE_LABELS] ?? lead.source}</div>
-              <div className="text-xs text-slate-500">{campaign?.name ?? 'Keine Kampagne'}</div>
+              {campaign?.name ? (
+                <div className="mt-0.5">
+                  <Link
+                    href={`/admin/campaigns/${campaign.id}`}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition"
+                  >
+                    <Globe2 className="h-3 w-3" />
+                    <span className="max-w-[22ch] truncate">{campaign.name}</span>
+                    <ArrowUpRight className="h-3 w-3 text-slate-400" />
+                  </Link>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-500">Keine Kampagne zugeordnet</div>
+              )}
             </div>
           </div>
         </div>
@@ -1968,6 +1996,98 @@ export function SecondaryInfoCard({ lead, campaign }: { lead: any; campaign: any
             </div>
           </div>
         </div>
+        {hasTracking && (
+          <div className="flex items-start gap-2.5 rounded-lg border border-slate-100 bg-gradient-to-br from-slate-50 to-white p-2.5 sm:col-span-2">
+            <Layers className="mt-0.5 shrink-0 h-3.5 w-3.5 text-slate-500" />
+            <div className="min-w-0 flex-1 w-full">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Tracking (UTM & Meta)</div>
+                {hasTracking && (
+                  <CopyButton
+                    size="sm"
+                    ariaLabel="Tracking-Daten kopieren"
+                    text={[
+                      utmSource ? `utm_source=${utmSource}` : '',
+                      utmMedium ? `utm_medium=${utmMedium}` : '',
+                      utmCampaign ? `utm_campaign=${utmCampaign}` : '',
+                      metaCampaignId ? `meta_campaign_id=${metaCampaignId}` : '',
+                      metaAdsetName ? `meta_adset=${metaAdsetName}` : '',
+                      metaFormName ? `meta_form=${metaFormName}` : '',
+                    ].filter(Boolean).join(' | ')}
+                  />
+                )}
+              </div>
+              <div className="mt-1.5 grid grid-cols-1 gap-y-1.5 gap-x-4 sm:grid-cols-2">
+                {hasUtm && (
+                  <div className="rounded-md border border-slate-100 bg-white p-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1 flex items-center gap-1">
+                      <Globe2 className="h-3 w-3" /> UTM
+                    </div>
+                    <div className="space-y-0.5 text-xs">
+                      {utmSource && (
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-500">Source</span>
+                          <span className="font-medium text-slate-800 truncate">{utmSource}</span>
+                        </div>
+                      )}
+                      {utmMedium && (
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-500">Medium</span>
+                          <span className="font-medium text-slate-800 truncate">{utmMedium}</span>
+                        </div>
+                      )}
+                      {utmCampaign && (
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-500">Kampagne</span>
+                          <span className="font-medium text-slate-800 truncate">{utmCampaign}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {hasMeta && (
+                  <div className="rounded-md border border-slate-100 bg-white p-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1 flex items-center gap-1">
+                      <Megaphone className="h-3 w-3" /> Meta Ads
+                    </div>
+                    <div className="space-y-0.5 text-xs">
+                      {metaCampaignId && (
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-500">Campaign</span>
+                          <span className="font-mono font-medium text-slate-800 truncate max-w-[28ch]">{metaCampaignId}</span>
+                        </div>
+                      )}
+                      {metaAdsetName && (
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-500">Ad Set</span>
+                          <span className="font-medium text-slate-800 truncate max-w-[28ch]">{metaAdsetName}</span>
+                        </div>
+                      )}
+                      {metaFormName && (
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-500">Formular</span>
+                          <span className="font-medium text-slate-800 truncate max-w-[28ch]">{metaFormName}</span>
+                        </div>
+                      )}
+                      {metaAdsetId && (
+                        <div className="flex justify-between gap-2 pt-0.5 border-t border-slate-50 mt-0.5">
+                          <span className="text-slate-400 text-[10px]">Ad Set ID</span>
+                          <span className="font-mono text-[10px] text-slate-500 truncate max-w-[28ch]">{metaAdsetId}</span>
+                        </div>
+                      )}
+                      {metaFormId && (
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-400 text-[10px]">Form ID</span>
+                          <span className="font-mono text-[10px] text-slate-500 truncate max-w-[28ch]">{metaFormId}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </details>
   )

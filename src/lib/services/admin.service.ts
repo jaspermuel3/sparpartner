@@ -4,6 +4,36 @@ import type { DatabaseUser, Lead, LeadStatus, ProductType } from '@/types'
 import { getUserEmailMap, withEmail } from '../user-emails'
 import { log } from '../logging'
 import { validatePasswordPolicy, isValidEmail } from '../validation'
+import { getLandingApiEnabled } from './system.service'
+
+const LANDING_DEFAULT_EXTERNAL_ID = 'landing_page_default'
+const LANDING_DEFAULT_CAMPAIGN_NAME = 'Landing Page · Standard'
+const META_DEFAULT_EXTERNAL_ID_PREFIX = 'meta::auto::'
+
+function slugify(input: string): string {
+  return input
+    .toString()
+    .toLowerCase()
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'untitled'
+}
+
+function stableHash(input: string): string {
+  let hash = 2166136261
+  const s = input ?? ''
+  for (let i = 0; i < s.length; i++) {
+    hash ^= s.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
 
 export async function createSeller(
   input: { email: string; password?: string; full_name: string; initial_balance?: number; role?: 'admin' | 'seller' },
@@ -612,7 +642,116 @@ export async function getAllCampaigns() {
   return (data ?? []) as any[]
 }
 
+/**
+ * Stellt sicher, dass die Default-Landing-Page-Kampagne vorhanden UND aktiv ist,
+ * sofern die Landing-API per System-Einstellung aktiviert ist.
+ *
+ * => Kampagne ist in der Übersicht IMMER sichtbar, solange Landing API an ist,
+ *    auch wenn noch gar kein Lead eingegangen ist.
+ */
+export async function ensureLandingDefaultCampaignIfApiEnabled(): Promise<any | null> {
+  try {
+    const landingApiEnabled = await getLandingApiEnabled()
+    if (!landingApiEnabled) return null
+
+    const admin = createAdminClient()
+
+    const externalId = LANDING_DEFAULT_EXTERNAL_ID
+    const name = LANDING_DEFAULT_CAMPAIGN_NAME
+
+    // 1) Upsert via external_id (bevorzugt)
+    try {
+      const { data, error } = await admin
+        .from('campaigns')
+        .upsert(
+          {
+            name,
+            source: 'landing_page',
+            is_active: true,
+            external_id: externalId,
+          },
+          { onConflict: 'external_id', ignoreDuplicates: false, defaultToNull: true },
+        )
+        .select('*')
+        .limit(1)
+        .maybeSingle()
+      if (data && !error) return data
+      if (error) {
+        log.warn('CAMPAIGNS', 'ensureLandingDefault: Upsert via external_id fehlgeschlagen – fallback', { external_id: externalId }, error)
+      }
+    } catch {
+      /* ignored, fallback follows */
+    }
+
+    // 2) Fallback: Lookup + Insert/Update
+    try {
+      const { data: existing } = await admin
+        .from('campaigns')
+        .select('*')
+        .or(`external_id.eq.${externalId},and(source.eq.landing_page,name.eq.${name})`)
+        .limit(1)
+        .maybeSingle()
+      if (existing) {
+        const isActive = Boolean((existing as any).is_active)
+        const hasName = String((existing as any).name ?? '') === name
+        const hasExternal = String((existing as any).external_id ?? '') === externalId
+        if (!isActive || !hasName || !hasExternal) {
+          const patch: Record<string, unknown> = { is_active: true }
+          if (!hasName) patch.name = name
+          if (!hasExternal) patch.external_id = externalId
+          await admin.from('campaigns').update(patch).eq('id', (existing as any).id)
+        }
+        return existing
+      }
+
+      const { data: created, error: createError } = await admin
+        .from('campaigns')
+        .insert({
+          name,
+          source: 'landing_page',
+          is_active: true,
+          external_id: externalId,
+        })
+        .select('*')
+        .limit(1)
+        .maybeSingle()
+      if (createError || !created) return null
+      return created
+    } catch (e) {
+      log.warn('CAMPAIGNS', 'ensureLandingDefault: Fallback fehlgeschlagen', undefined, e)
+      return null
+    }
+  } catch (e) {
+    log.warn('CAMPAIGNS', 'ensureLandingDefault: Swallowed error', undefined, e)
+    return null
+  }
+}
+
+/**
+ * Baut eine stabile external_id für Meta-Kampagnen, auch wenn Meta keine native campaign_id liefert.
+ * => Verhindert Duplikate, wenn Kampagnen nur per Name/UTM identifizierbar sind.
+ */
+export function buildMetaStableExternalId({
+  metaCampaignId,
+  campaignName,
+  utmCampaign,
+}: {
+  metaCampaignId?: string | null
+  campaignName?: string | null
+  utmCampaign?: string | null
+}): string | null {
+  if (metaCampaignId && String(metaCampaignId).trim()) return String(metaCampaignId).trim()
+  const parts: string[] = []
+  if (campaignName) parts.push(String(campaignName).trim())
+  if (utmCampaign) parts.push(String(utmCampaign).trim())
+  if (parts.length === 0) return null
+  const raw = parts.join('||')
+  return META_DEFAULT_EXTERNAL_ID_PREFIX + slugify(raw) + '_' + stableHash(raw)
+}
+
 export async function getCampaignsWithStats() {
+  await ensureLandingDefaultCampaignIfApiEnabled()
+
   const admin = createAdminClient()
   const campaigns = await getAllCampaigns()
   const campaignIds = campaigns.map((c: any) => c.id)
@@ -1177,7 +1316,7 @@ export async function getLandingLeadsDashboardStats() {
       admin
         .from('leads')
         .select('id', { count: 'exact', head: true } as any)
-        .neq('assigned_user_id', null as any),
+        .not('assigned_user_id', 'is', null),
     ),
     safeLandingFilter(
       admin
@@ -1196,7 +1335,7 @@ export async function getLandingLeadsDashboardStats() {
     ),
     safeLandingFilter(admin.from('leads').select('zip').neq('zip', '')),
     safeLandingFilter(
-      admin.from('leads').select('campaign_id, id').neq('campaign_id', '' as any),
+      admin.from('leads').select('campaign_id, id').not('campaign_id', 'is', null),
     ),
   ])
 
@@ -1339,7 +1478,7 @@ export async function getLandingLeadsList(filters: LandingLeadFilters = {}) {
   if (filters.assignment === 'available') {
     query = query.eq('assigned_user_id', null)
   } else if (filters.assignment === 'assigned') {
-    query = query.neq('assigned_user_id', null as any)
+    query = query.not('assigned_user_id', 'is', null)
   }
   if (filters.statuses && filters.statuses.length > 0) {
     query = query.in('status', filters.statuses)
@@ -1584,6 +1723,67 @@ export async function bulkDeactivateSellers(
     }
   }
   return { ok, skipped }
+}
+
+/* ============================================================
+   Kampagnen-Detailansicht (Detail + zugehörige Leads)
+   ============================================================ */
+
+export async function getCampaignById(campaignId: string) {
+  const admin = createAdminClient()
+  const list = await getCampaignsWithStats()
+  return list.find((c: any) => String(c.id) === String(campaignId)) ?? null
+}
+
+export async function getCampaignLeads(
+  campaignId: string,
+  params: {
+    page?: number
+    pageSize?: number
+    sortBy?: string
+    sortDir?: 'asc' | 'desc'
+    statuses?: LeadStatus[]
+  } = {},
+) {
+  const admin = createAdminClient()
+  const page = params.page ?? 1
+  const pageSize = params.pageSize ?? 25
+  const sortBy = params.sortBy ?? 'created_at'
+  const sortDir = params.sortDir ?? 'desc'
+
+  let q: any = admin
+    .from('leads')
+    .select(
+      `
+      *,
+      assigned_user:users!leads_assigned_user_id_fkey!left(id, full_name)
+    `,
+      { count: 'exact' } as any,
+    )
+    .eq('campaign_id', campaignId)
+    .eq('is_deleted', false)
+
+  if (params.statuses && params.statuses.length > 0) {
+    q = q.in('status', params.statuses)
+  }
+
+  q = q.order(sortBy, { ascending: sortDir === 'asc' })
+
+  const fromIdx = (page - 1) * pageSize
+  const { data, count, error } = await (q.range(fromIdx, fromIdx + pageSize - 1) as any)
+  if (error) throw error
+
+  const rows = (data ?? []) as any[]
+  const userIds = rows.map((r) => r.assigned_user?.id).filter(Boolean)
+  if (userIds.length > 0) {
+    const emailMap = await getUserEmailMap(userIds)
+    for (const row of rows) {
+      if (row.assigned_user?.id) {
+        row.assigned_user.email = emailMap.get(row.assigned_user.id) ?? ''
+      }
+    }
+  }
+  return { rows: rows as Lead[], count: count ?? rows.length, page, pageSize }
 }
 
 

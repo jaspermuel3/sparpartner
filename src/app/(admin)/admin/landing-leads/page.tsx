@@ -41,9 +41,13 @@ const statusMap: Record<string, any> = {
   archived: 'archived',
 }
 
-export default async function AdminLandingLeadsPage(props: { searchParams: SearchParams }) {
+export default async function AdminLandingLeadsPage({
+  searchParams,
+}: {
+  searchParams: SearchParams
+}) {
   await requireAdmin()
-  const sp = await Promise.resolve(props.searchParams)
+  const sp = searchParams
 
   const products = (sp.product ?? '')
     .split(',')

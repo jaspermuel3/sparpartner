@@ -18,6 +18,7 @@ import {
   PanelLeft,
   PanelLeftClose,
   Globe2,
+  Megaphone,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -50,6 +51,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/leads', label: 'Leads', icon: Layers },
   { href: '/admin/landing-leads', label: 'Landing Leads', icon: Globe2 },
+  { href: '/admin/campaigns', label: 'Kampagnen', icon: Megaphone },
   { href: '/admin/sellers', label: 'Benutzer', icon: Users },
   { href: '/admin/tokens', label: 'Tokens', icon: CreditCard },
   { href: '/admin/stats', label: 'Statistiken', icon: BarChart3 },

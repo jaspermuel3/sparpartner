@@ -67,7 +67,6 @@ function corsResponseInit(req: Request, init: ResponseInit = {}): ResponseInit {
   existingHeaders.set('Access-Control-Allow-Credentials', 'true')
   existingHeaders.set('Access-Control-Max-Age', '86400')
   existingHeaders.set('Vary', 'Origin')
-  // Prevent Clickjacking & MIME-Sniffing auf API-Ebene zusätzlich.
   existingHeaders.set('X-Frame-Options', 'DENY')
   existingHeaders.set('X-Content-Type-Options', 'nosniff')
   existingHeaders.set('Referrer-Policy', 'no-referrer')
@@ -78,12 +77,100 @@ function jsonWithCors<T>(req: Request, body: T, init: ResponseInit = {}): NextRe
   return NextResponse.json(body, corsResponseInit(req, init))
 }
 
+function sanitizeNullable(raw: unknown, maxLen = 200): string | null {
+  let s = String(raw ?? '')
+  s = s.replace(/<[^>]*>/g, '')
+  s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+  s = s.replace(/\uFEFF/g, '').trim()
+  if (!s) return null
+  if (s.length > maxLen) s = s.slice(0, maxLen)
+  return s
+}
+
+/**
+ * Auto-Upsert der Kampagnen-Zuordnung für Landing Page Leads.
+ * Gibt die campaign_id (UUID) zurück, falls einsatzbereit, sonst null.
+ *
+ * Strategie:
+ * - Wenn utm_campaign gesetzt ist: external_id = `landing::${utmCampaign}` (stabil, dedup-sicher)
+ * - Wenn utm_campaign fehlt: Default-Kampagne mit external_id = "landing_page_default"
+ *   => JEDER Landing-Lead wird einer Kampagne zugeordnet, auch ohne explizite UTMs.
+ */
+async function upsertLandingCampaign(
+  admin: ReturnType<typeof createAdminClient>,
+  payload: PublicLeadPayload,
+): Promise<string | null> {
+  const utmCampaign = sanitizeNullable(payload.utm_campaign, 200)
+  const utmSource = sanitizeNullable(payload.utm_source, 64)
+
+  const sourceLabel: any = 'landing_page'
+
+  let externalId: string
+  let campaignName: string
+  if (utmCampaign) {
+    externalId = 'landing::' + utmCampaign
+    campaignName = utmCampaign
+  } else {
+    externalId = 'landing_page_default'
+    campaignName = utmSource
+      ? `Landing Page · ${utmSource}`
+      : 'Landing Page · Standard'
+  }
+
+  const toUpsert: Record<string, unknown> = {
+    name: campaignName,
+    source: sourceLabel,
+    is_active: true,
+    external_id: externalId,
+  }
+
+  try {
+    // 1) Upsert via external_id (wenn Unique-Constraint vorhanden => 0021 Migration)
+    try {
+      const { data, error } = await admin
+        .from('campaigns')
+        .upsert(toUpsert, { onConflict: 'external_id', ignoreDuplicates: false })
+        .select('id')
+        .limit(1)
+        .maybeSingle()
+      if (data && !error) return (data as { id: string }).id
+      if (error) {
+        log.warn('PUBLIC_LEADS', 'Landing Kampagnen-Upsert via external_id fehlgeschlagen – fallback', { external_id: externalId }, error)
+      }
+    } catch {
+      /* ignore upsert error, handle via fallback below */
+    }
+
+    // 2) Fallback: Lookup + Insert (falls Unique-Constraint fehlt oder Upsert nicht erlaubt)
+    {
+      const { data: existing } = await admin
+        .from('campaigns')
+        .select('id')
+        .or(`external_id.eq.${externalId},and(source.eq.${sourceLabel},name.eq.${campaignName})`)
+        .limit(1)
+        .maybeSingle()
+      if (existing) return (existing as { id: string }).id
+
+      const { data, error } = await admin
+        .from('campaigns')
+        .insert(toUpsert)
+        .select('id')
+        .limit(1)
+        .maybeSingle()
+      if (error || !data) return null
+      return (data as { id: string }).id
+    }
+  } catch (e) {
+    log.warn('PUBLIC_LEADS', 'Kampagnen-Upsert ist fehlgeschlagen (swallowed)', undefined, e)
+    return null
+  }
+}
+
 export async function OPTIONS(req: Request) {
   return new NextResponse(null, corsResponseInit(req, { status: 204 }))
 }
 
 export async function POST(req: Request) {
-  // ---------- Rate-Limit (pro IP) ----------
   const rl = rateLimit(req, 'publicLeads')
   const rlHeaders = {
     'X-RateLimit-Limit': String(rl.limit),
@@ -185,33 +272,23 @@ export async function POST(req: Request) {
 
     const admin = createAdminClient()
 
-    let campaignId: string | null = null
-    if (body.utm_campaign && body.utm_campaign.trim()) {
-      try {
-        const { data: camp } = await admin
-          .from('campaigns')
-          .select('id')
-          .or(`external_id.eq.${body.utm_campaign.trim()},name.ilike.%${body.utm_campaign.trim()}%`)
-          .eq('is_active', true)
-          .limit(1)
-          .maybeSingle()
-        if (camp) campaignId = (camp as unknown as { id: string }).id
-      } catch (e) {
-        log.warn('PUBLIC_LEADS', 'Campaign-Auflösung fehlgeschlagen (ignoriert)', {
-          utm_campaign: body.utm_campaign,
-        }, e)
-      }
-    }
+    const utmSource = sanitizeNullable(body.utm_source, 64)
+    const utmMedium = sanitizeNullable(body.utm_medium, 128)
+    const utmCampaign = sanitizeNullable(body.utm_campaign, 200)
+    const utmTerm = sanitizeNullable(body.utm_term, 200)
+    const utmContent = sanitizeNullable(body.utm_content, 255)
+
+    const campaignId = await upsertLandingCampaign(admin, body)
 
     const notesParts: string[] = ['[Landing Page Sparpartner24]']
     if (body.wants_consultation) notesParts.push('Beratungsgespräch gewünscht')
     else notesParts.push('Kein Beratungsgespräch gewünscht')
     const utm: string[] = []
-    if (body.utm_source) utm.push(`source=${body.utm_source}`)
-    if (body.utm_medium) utm.push(`medium=${body.utm_medium}`)
-    if (body.utm_campaign) utm.push(`campaign=${body.utm_campaign}`)
-    if (body.utm_term) utm.push(`term=${body.utm_term}`)
-    if (body.utm_content) utm.push(`content=${body.utm_content}`)
+    if (utmSource) utm.push(`source=${utmSource}`)
+    if (utmMedium) utm.push(`medium=${utmMedium}`)
+    if (utmCampaign) utm.push(`campaign=${utmCampaign}`)
+    if (utmTerm) utm.push(`term=${utmTerm}`)
+    if (utmContent) utm.push(`content=${utmContent}`)
     if (utm.length > 0) notesParts.push(`UTM: ${utm.join(' | ')}`)
 
     const insertPayload: Record<string, unknown> = {
@@ -230,6 +307,9 @@ export async function POST(req: Request) {
       status: 'new',
       token_cost: 1,
       source: 'sonstiges',
+      utm_source: utmSource,
+      utm_medium: utmMedium,
+      utm_campaign: utmCampaign,
     }
 
     let leadId: string | null = null
@@ -272,10 +352,11 @@ export async function POST(req: Request) {
     await logAudit(null, 'LEAD_CREATED', 'lead', leadId, {
       source: 'landing_page_api',
       utm: {
-        source: body.utm_source ?? null,
-        medium: body.utm_medium ?? null,
-        campaign: body.utm_campaign ?? null,
+        source: utmSource,
+        medium: utmMedium,
+        campaign: utmCampaign,
       },
+      campaign_id: campaignId,
       wants_consultation: !!body.wants_consultation,
     }).catch((e) => log.warn('PUBLIC_LEADS', 'Audit-Log fehlgeschlagen (swallowed)', undefined, e))
 
@@ -283,6 +364,7 @@ export async function POST(req: Request) {
       lead_id: leadId,
       product: body.product,
       source: 'landing_page_api',
+      campaign_id: campaignId,
     })
 
     return jsonWithCors(
@@ -290,6 +372,7 @@ export async function POST(req: Request) {
       {
         success: true,
         lead_id: leadId,
+        campaign_id: campaignId,
         savings_estimate_eur: calculateSavingsEstimate(body),
       },
       { status: 200, headers: rlHeaders },
