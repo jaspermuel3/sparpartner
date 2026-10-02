@@ -10,13 +10,21 @@
 -- Rollen-Logik:
 --   E-Mail enthält "admin"                → role = 'admin'
 --   Sonst                                → role = 'seller'
+--
+-- WICHTIG: auth.users.email hat Typ CITEXT. Wir casten ihn immer nach
+-- TEXT bei Zuweisung nach TEXT-Variablen / TEXT-Funktionen, um Fehler
+-- 42704 "type citext does not exist" zu vermeiden, falls die Extension
+-- im Suchpfad der Session nicht sichtbar ist.
 -- =====================================================================
+
+CREATE EXTENSION IF NOT EXISTS citext;
 
 DO $$
 DECLARE
   v_auth RECORD;
   v_exists INT;
   v_role   TEXT;
+  v_email  TEXT;  -- IMMER TEXT, kein CITEXT → vermeidet 42704
   v_name   TEXT;
   v_created INT := 0;
   v_skipped INT := 0;
@@ -24,18 +32,20 @@ BEGIN
   FOR v_auth IN
     SELECT
       id,
-      email,
+      email::TEXT AS email_txt,
       raw_user_meta_data,
       created_at
     FROM auth.users
     ORDER BY created_at ASC
   LOOP
+    v_email := v_auth.email_txt;   -- explizit TEXT
+
     SELECT COUNT(*) INTO v_exists
     FROM public.users WHERE id = v_auth.id;
 
     IF v_exists = 0 THEN
       -- Role bestimmen
-      IF v_auth.email ILIKE '%admin%' THEN
+      IF v_email ILIKE '%admin%' THEN
         v_role := 'admin';
       ELSE
         v_role := 'seller';
@@ -45,7 +55,7 @@ BEGIN
       v_name := COALESCE(
         NULLIF(v_auth.raw_user_meta_data->>'full_name', ''),
         NULLIF(v_auth.raw_user_meta_data->>'name', ''),
-        SPLIT_PART(COALESCE(v_auth.email::text, 'user@unknown'), '@', 1)
+        SPLIT_PART(COALESCE(v_email, 'user@unknown'), '@', 1)
       );
 
       -- public.users Eintrag anlegen
@@ -58,7 +68,7 @@ BEGIN
       ON CONFLICT (id) DO NOTHING;
 
       RAISE NOTICE '✅ Angelegt: public.users id=% email=% role=%',
-        v_auth.id::text, COALESCE(v_auth.email::text, '-'), v_role;
+        v_auth.id::text, COALESCE(v_email, '-'), v_role;
       v_created := v_created + 1;
     ELSE
       v_skipped := v_skipped + 1;
@@ -68,14 +78,14 @@ BEGIN
     UPDATE public.users u SET
       is_active = TRUE,
       role      = COALESCE(u.role,
-                    CASE WHEN v_auth.email ILIKE '%admin%'
+                    CASE WHEN v_email ILIKE '%admin%'
                       THEN 'admin'::public.user_role
                       ELSE 'seller'::public.user_role
                     END),
       full_name = COALESCE(NULLIF(u.full_name, ''),
                     COALESCE(v_auth.raw_user_meta_data->>'full_name',
                              v_auth.raw_user_meta_data->>'name',
-                             SPLIT_PART(COALESCE(v_auth.email::text,'user@unknown'),'@',1))),
+                             SPLIT_PART(COALESCE(v_email,'user@unknown'),'@',1))),
       updated_at = NOW()
     WHERE u.id = v_auth.id
       AND ( u.is_active = FALSE

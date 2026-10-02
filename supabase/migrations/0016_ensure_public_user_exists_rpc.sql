@@ -3,7 +3,13 @@
 -- existiert (Enum-safe, keine 42804 Fehler wegen user_role vs. TEXT).
 -- Aufgerufen aus /api/auth/login/route.ts (Auto-Login Fallback).
 -- Kann auch manuell im SQL Editor für einzelne User verwendet werden.
+--
+-- Vorab: citext Extension laden (auth.users.email nutzt citext).
+-- Fallback falls EXTENSION nicht geladen werden kann → wir verwenden
+-- native TEXT + ILIKE und casten Email-Spalte bei Bedarf.
 -- =====================================================================
+
+CREATE EXTENSION IF NOT EXISTS citext;
 
 DROP FUNCTION IF EXISTS public.ensure_public_user_exists(UUID, TEXT, TEXT) CASCADE;
 
@@ -19,14 +25,16 @@ CREATE OR REPLACE FUNCTION public.ensure_public_user_exists(
   last_login_at TIMESTAMPTZ
 ) LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
-  v_auth_email  CITEXT;
+  v_auth_email  TEXT;
   v_auth_meta   JSONB;
   v_insert_role public.user_role;
   v_name        TEXT;
   v_created     BOOLEAN := FALSE;
 BEGIN
-  -- Auth-User Infos holen (wir nehmen E-Mail + Meta um Namen/Rolle zu bestimmen)
-  SELECT email, raw_user_meta_data
+  -- Auth-User Infos holen (Email + Meta für Rollen-/Namensfindung).
+  -- Wir casten Email bewusst nach TEXT, um Abhängigkeit vom citext
+  -- Extension-Typ in lokalen Variablen loszuwerden (löst Fehler 42704).
+  SELECT email::TEXT, raw_user_meta_data
     INTO v_auth_email, v_auth_meta
   FROM auth.users
   WHERE id = p_auth_id;
@@ -37,7 +45,7 @@ BEGIN
 
   -- Fallback-Rolle casten (ENUM-safe! → löst 42804)
   IF LOWER(COALESCE(p_fallback_role,'')) = 'admin'
-     OR v_auth_email::text ILIKE '%admin%' THEN
+     OR COALESCE(v_auth_email, '') ILIKE '%admin%' THEN
     v_insert_role := 'admin'::public.user_role;
   ELSE
     v_insert_role := 'seller'::public.user_role;
@@ -48,7 +56,7 @@ BEGIN
     NULLIF(p_fallback_name, ''),
     NULLIF(v_auth_meta->>'full_name', ''),
     NULLIF(v_auth_meta->>'name', ''),
-    SPLIT_PART(COALESCE(v_auth_email::text,'user@unknown'), '@', 1)
+    SPLIT_PART(COALESCE(v_auth_email,'user@unknown'), '@', 1)
   );
 
   -- Neu anlegen falls nicht da (mit Enum-safe Rolle)
