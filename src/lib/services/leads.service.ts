@@ -97,6 +97,7 @@ export async function getLeadWithDetails(leadId: string, viewerId: string, viewe
       lead_documents!left(*)
     `)
     .eq('id', leadId)
+    .eq('is_deleted', false)
     .limit(1)
 
   if (viewerRole !== 'admin') {
@@ -123,6 +124,7 @@ export async function getLeadWithDetails(leadId: string, viewerId: string, viewe
         lead_documents!left(*)
       `)
       .eq('id', leadId)
+      .eq('is_deleted', false)
       .limit(1)
     if (viewerRole !== 'admin') {
       const fallbackQueryTyped = fallbackQuery.eq('assigned_user_id', viewerId)
@@ -256,6 +258,7 @@ export async function getMyLeads(
     .from('leads')
     .select('*', { count: 'exact' })
     .eq('assigned_user_id', userId)
+    .eq('is_deleted', false)
 
   if (params.statuses && params.statuses.length > 0) {
     query = query.in('status', params.statuses) as typeof query
@@ -423,15 +426,15 @@ export async function getSellerDashboardStats(userId: string) {
     yesterdayLeadsToday,
   ] = await Promise.all([
     admin.from('token_wallets').select('balance').eq('user_id', userId).maybeSingle(),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).gte('updated_at', todayISO),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).eq('status', 'closed'),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).in('status', ['no_interest', 'wrong_data', 'canceled']),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).gte('updated_at', todayISO).eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).eq('status', 'closed').eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).in('status', ['no_interest', 'wrong_data', 'canceled']).eq('is_deleted', false),
     admin.from('callbacks').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'offen'),
     admin.from('callbacks').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'offen').lt('callback_at', new Date().toISOString()),
     admin.from('lead_status_history').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('new_status', 'closed').gte('created_at', yesterdayISO).lt('created_at', todayISO),
     admin.from('lead_status_history').select('id', { count: 'exact', head: true }).eq('user_id', userId).in('new_status', ['no_interest', 'wrong_data', 'canceled']).gte('created_at', yesterdayISO).lt('created_at', todayISO),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).gte('updated_at', yesterdayISO).lt('updated_at', todayISO),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).gte('updated_at', yesterdayISO).lt('updated_at', todayISO).eq('is_deleted', false),
   ])
 
   const abschlüsse = closedRes.count ?? 0
@@ -591,6 +594,7 @@ export async function getWorklist(userId: string, limit = 10): Promise<WorklistI
       .select('id, first_name, last_name, phone, created_at')
       .eq('assigned_user_id', userId)
       .eq('status', 'assigned')
+      .eq('is_deleted', false)
       .order('created_at', { ascending: true })
       .limit(Math.ceil(limit / 2))
       .then((r) => r.data ?? []),
@@ -599,6 +603,7 @@ export async function getWorklist(userId: string, limit = 10): Promise<WorklistI
       .select('id, first_name, last_name, phone, updated_at')
       .eq('assigned_user_id', userId)
       .eq('status', 'contacted')
+      .eq('is_deleted', false)
       .lte('updated_at', staleAfter)
       .order('updated_at', { ascending: true })
       .limit(Math.ceil(limit / 3))
@@ -681,6 +686,7 @@ export async function getAvailableLeadCount(product?: ProductType | null): Promi
   let query = admin
     .from('leads')
     .select('id', { count: 'exact', head: true })
+    .eq('is_deleted', false)
     .is('assigned_user_id', null)
     .not('status', 'in', '("canceled","wrong_data","no_interest","closed")')
 
@@ -703,6 +709,7 @@ export async function getAvailableLeadCountBreakdown(): Promise<{
   const base = admin
     .from('leads')
     .select('id, product', { count: 'exact' })
+    .eq('is_deleted', false)
     .is('assigned_user_id', null)
     .not('status', 'in', '("canceled","wrong_data","no_interest","closed")')
 

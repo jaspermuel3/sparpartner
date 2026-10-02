@@ -51,8 +51,17 @@ export async function POST(request: NextRequest) {
   } catch {
   }
 
+  const formData = await request.formData().catch(() => null)
+  const nextRaw = formData ? String(formData.get('next') ?? '') : ''
+  const next = (nextRaw.startsWith('/login') ? nextRaw : '') || '/login'
+
   const redirectUrl = request.nextUrl.clone()
-  redirectUrl.pathname = '/login'
+  const [path, query] = next.split('?')
+  redirectUrl.pathname = path || '/login'
+  if (query) {
+    const sp = new URLSearchParams(query)
+    sp.forEach((v, k) => redirectUrl.searchParams.set(k, v))
+  }
   const redirect = NextResponse.redirect(redirectUrl, { status: 303 })
 
   for (const c of response.cookies.getAll()) redirect.cookies.set(c)

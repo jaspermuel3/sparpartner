@@ -8,10 +8,11 @@ function LoginFormInner() {
   const searchParams = useSearchParams()
   const next = searchParams.get('next')?.startsWith('/') ? searchParams.get('next')! : '/dashboard'
   const errorParam = searchParams.get('error') ?? null
+  const prefilledEmail = searchParams.get('email') ?? ''
 
   const [showPassword, setShowPassword] = useState(false)
   const [isPending, startTransition] = useTransition()
-  const [email, setEmail] = useState<string>('')
+  const [email, setEmail] = useState<string>(prefilledEmail)
   const [password, setPassword] = useState<string>('')
   const [localError, setLocalError] = useState<string | null>(null)
 

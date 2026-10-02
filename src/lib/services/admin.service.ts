@@ -147,10 +147,10 @@ export async function getAdminDashboardStats() {
     closedLeads,
     activeSellers,
   ] = await Promise.all([
-    admin.from('leads').select('id', { count: 'exact', head: true }).gte('created_at', todayISO),
-    admin.from('leads').select('id', { count: 'exact', head: true }).is('assigned_user_id', null),
-    admin.from('leads').select('id', { count: 'exact', head: true }).not('assigned_user_id', 'is', null),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('status', 'closed'),
+    admin.from('leads').select('id', { count: 'exact', head: true }).gte('created_at', todayISO).eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).is('assigned_user_id', null).eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).not('assigned_user_id', 'is', null).eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('status', 'closed').eq('is_deleted', false),
     admin.from('users').select('id', { count: 'exact', head: true }).eq('is_active', true).eq('role', 'seller'),
   ])
 
@@ -162,6 +162,7 @@ export async function getAdminDashboardStats() {
     .from('leads')
     .select('id', { count: 'exact', head: true })
     .in('status', ['no_interest', 'wrong_data', 'canceled'])
+    .eq('is_deleted', false)
   const lostN = lost ?? 0
   const quote = (closed + lostN) > 0 ? closed / (closed + lostN) : 0
 
@@ -191,7 +192,7 @@ export async function getLeadStatusDistribution() {
   } catch {
     // Fallback unten
   }
-  const { data } = await admin.from('leads').select('status')
+  const { data } = await admin.from('leads').select('status').eq('is_deleted', false)
   const map: Record<string, number> = {}
   for (const row of data ?? []) {
     const s = (row as any).status as LeadStatus
@@ -229,7 +230,7 @@ export async function getLeadsPerDay(days = 7) {
     perDay[key] = { newCount: 0, closedCount: 0 }
   }
   const [newRows, closedRows] = await Promise.all([
-    admin.from('leads').select('created_at').gte('created_at', fromISO),
+    admin.from('leads').select('created_at').gte('created_at', fromISO).eq('is_deleted', false),
     admin
       .from('lead_status_history')
       .select('created_at')
@@ -277,6 +278,7 @@ export async function adminGetAllLeads(params: {
       `*, assigned_user:users!leads_assigned_user_id_fkey!left(id, full_name)`,
       { count: 'exact' } as any,
     )
+    .eq('is_deleted', false)
 
   if (params.statuses && params.statuses.length > 0) {
     query = query.in('status', params.statuses)
@@ -388,9 +390,9 @@ export async function adminResetLead(leadId: string, byUserId: string, refund: b
 export async function getSellerPerformance(sellerId: string) {
   const admin = createAdminClient()
   const [leads, closed, lost, contactAttempts, contactedQ] = await Promise.all([
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', sellerId),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', sellerId).eq('status', 'closed'),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', sellerId).in('status', ['no_interest', 'wrong_data', 'canceled']),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', sellerId).eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', sellerId).eq('status', 'closed').eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', sellerId).in('status', ['no_interest', 'wrong_data', 'canceled']).eq('is_deleted', false),
     admin.from('contact_attempts').select('id', { count: 'exact', head: true }).eq('user_id', sellerId),
     admin
       .from('contact_attempts')
@@ -429,7 +431,7 @@ export async function getAuditLogs(limit = 200) {
 
 export async function getStatistics(sellerId?: string, fromDate?: string, toDate?: string) {
   const admin = createAdminClient()
-  let leadsQ = admin.from('leads').select('id, status, assigned_user_id', { count: 'planned' })
+  let leadsQ = admin.from('leads').select('id, status, assigned_user_id', { count: 'planned' }).eq('is_deleted', false)
   let contactsQ = admin.from('contact_attempts').select('id, result, user_id, lead_id', { count: 'planned' })
   let callbacksQ = admin.from('callbacks').select('id, status', { count: 'planned' })
 
@@ -484,6 +486,7 @@ export async function getSellerLeads(sellerId: string, limit = 100) {
     .from('leads')
     .select('*')
     .eq('assigned_user_id', sellerId)
+    .eq('is_deleted', false)
     .order('created_at', { ascending: false })
     .limit(limit)
   return (data ?? []) as any[]
@@ -553,6 +556,7 @@ export async function getCampaignsWithStats() {
     .from('leads')
     .select('campaign_id, status, assigned_user_id')
     .in('campaign_id', campaignIds)
+    .eq('is_deleted', false)
 
   const leadCounts: Record<string, any> = {}
   for (const row of (leads ?? []) as any[]) {
@@ -571,6 +575,7 @@ export async function getCampaignsWithStats() {
     .from('leads')
     .select('campaign_id, power_consumption, gas_consumption')
     .in('campaign_id', campaignIds)
+    .eq('is_deleted', false)
 
   for (const row of (consumptions ?? []) as any[]) {
     const cid = row.campaign_id
@@ -643,7 +648,7 @@ export async function getDashboardStatsExtended(days: number = 14) {
   }
 
   const [newLeadsRows, closedRows, debitRows, sellersNow] = await Promise.all([
-    admin.from('leads').select('created_at').gte('created_at', fromISO),
+    admin.from('leads').select('created_at').gte('created_at', fromISO).eq('is_deleted', false),
     admin.from('lead_status_history').select('created_at').eq('new_status', 'closed').gte('created_at', fromISO),
     admin.from('token_transactions').select('created_at, amount').lt('amount', 0).gte('created_at', fromISO),
     getAdminDashboardStats(),
@@ -1063,9 +1068,13 @@ export async function getLandingLeadsDashboardStats() {
   const filters: any = [{ field: 'source', op: 'in', value: ['landing_page', 'sonstiges'] }]
   const safeLandingFilter = (q: any) => {
     try {
-      return q.or('source.eq.landing_page,source.eq.sonstiges')
+      return q
+        .eq('is_deleted', false)
+        .or('source.eq.landing_page,source.eq.sonstiges')
     } catch {
-      return q.ilike('notes', '%Landing Page%')
+      return q
+        .eq('is_deleted', false)
+        .ilike('notes', '%Landing Page%')
     }
   }
 
@@ -1248,6 +1257,7 @@ export async function getLandingLeadsList(filters: LandingLeadFilters = {}) {
       `*, assigned_user:users!leads_assigned_user_id_fkey!left(id, full_name), campaign:campaigns(id, name, external_id)`,
       { count: 'exact' } as any,
     )
+    .eq('is_deleted', false)
 
   try {
     query = query.or('source.eq.landing_page,source.eq.sonstiges')

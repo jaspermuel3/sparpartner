@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
 
     const { data: dbUser } = await admin
       .from('users')
-      .select('id, role, is_active')
+      .select('id, role, is_active, last_login_at, full_name')
       .eq('id', authUser.id)
       .limit(1)
       .maybeSingle()
@@ -110,6 +110,31 @@ export async function POST(request: NextRequest) {
       loginRedirect.searchParams.set('error', 'inactive')
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
+
+    if (dbUser.last_login_at) {
+      try {
+        const cookiePayload = JSON.stringify({
+          at: dbUser.last_login_at,
+          email: authUser.email ?? null,
+          full_name: dbUser.full_name ?? null,
+        })
+        response.cookies.set({
+          name: 'crm:last_login_context',
+          value: encodeURIComponent(cookiePayload),
+          path: '/',
+          httpOnly: false,
+          sameSite: 'lax',
+          maxAge: 60,
+        })
+      } catch {}
+    }
+
+    try {
+      await admin
+        .from('users')
+        .update({ last_login_at: new Date().toISOString() })
+        .eq('id', authUser.id)
+    } catch {}
 
     let safeNext = next
     const isAdmin = dbUser.role === 'admin'

@@ -28,6 +28,7 @@ import type { UserRole } from '@/types'
 import { UserMenu } from './UserMenu'
 import { NotificationCenter } from '@/components/ui-custom/NotificationCenter'
 import { GlobalNotifiers } from '@/components/ui-custom/GlobalNotifiers'
+import { AuthSessionSync } from '@/components/ui-custom/AuthSessionSync'
 
 interface NavItem {
   href: string
@@ -333,7 +334,7 @@ function MobileHeader({
             </div>
           )}
           <NotificationCenter />
-          <UserMenu role={role}>
+          <UserMenu role={role as 'admin' | 'seller'} email={email} fullName={fullName}>
             <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm hover:bg-slate-50 transition-colors cursor-pointer">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-[11px] font-semibold text-white">
                 {(fullName ?? email ?? '?').slice(0, 1).toUpperCase()}
@@ -347,6 +348,7 @@ function MobileHeader({
         </div>
       </header>
       <GlobalNotifiers />
+      <AuthSessionSync email={email} fullName={fullName} role={role as 'admin' | 'seller'} />
     </>
   )
 }
