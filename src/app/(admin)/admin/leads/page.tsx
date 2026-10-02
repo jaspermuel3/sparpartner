@@ -7,40 +7,132 @@ import {
 } from '@/lib/services/admin.service'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardContent } from '@/components/ui/card'
-import { LeadStatusBadge } from '@/components/ui-custom/StatusBadges'
-import { PhoneLink } from '@/components/ui-custom/PhoneLink'
-import { AssignLeadDialog, ResetLeadDialog, CreateLeadDialog, HoldLeadDialog } from './AdminLeadDialogs'
+import { CreateLeadDialog } from './AdminLeadDialogs'
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Input } from '@/components/ui/input'
+  Input,
+} from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Layers, ChevronLeft, ChevronRight, Filter, X, Snowflake } from 'lucide-react'
+import {
+  Search,
+  X,
+  Calendar,
+  Plus,
+  ArrowUpDown,
+  Inbox,
+  Clock,
+  FileText,
+  CheckCircle2,
+  Ban,
+  Zap,
+  Snowflake,
+  UserCheck,
+} from 'lucide-react'
 import {
   LEAD_STATUS_LABELS,
   PRODUCT_LABELS,
-  formatDate,
-  formatPhone,
-  formatDaysSince,
-  leadAgeClass,
   SOURCE_LABELS,
 } from '@/lib/constants'
-import type { LeadStatus } from '@/types'
+import type { LeadStatus, ProductType } from '@/types'
+import { Suspense } from 'react'
 import { buildQueryString, cn } from '@/lib/utils'
-import { AdminLeadFilterClient } from './AdminLeadFilterClient'
+import { AdminLeadTableView, AdminLeadTableSkeleton } from './AdminLeadTableView'
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { AdminLeadFilterClient } from './AdminLeadFilterClient'
 
 export const metadata = { title: 'Leads · Admin' }
+
+const ALL_PAGE_SIZES = [10, 25, 50, 100] as const
+
+type CategoryKey = 'all' | 'open' | 'callback' | 'offer' | 'closed' | 'canceled'
+
+const CATEGORIES: Array<{
+  key: CategoryKey
+  label: string
+  statuses: LeadStatus[]
+  dot: string
+  ring: string
+  activeBg: string
+  activeText: string
+  icon: React.ComponentType<{ className?: string }>
+}> = [
+  {
+    key: 'all',
+    label: 'Alle',
+    statuses: [],
+    dot: 'bg-slate-400',
+    ring: 'ring-slate-200',
+    activeBg: 'bg-slate-900 text-white border-slate-900',
+    activeText: 'text-slate-700',
+    icon: Inbox,
+  },
+  {
+    key: 'open',
+    label: 'Offen',
+    statuses: ['new', 'assigned', 'contacted'],
+    dot: 'bg-blue-500',
+    ring: 'ring-blue-200',
+    activeBg: 'bg-blue-600 text-white border-blue-600',
+    activeText: 'text-blue-700',
+    icon: Zap,
+  },
+  {
+    key: 'callback',
+    label: 'Rückruf',
+    statuses: ['callback'],
+    dot: 'bg-orange-500',
+    ring: 'ring-orange-200',
+    activeBg: 'bg-orange-600 text-white border-orange-600',
+    activeText: 'text-orange-700',
+    icon: Clock,
+  },
+  {
+    key: 'offer',
+    label: 'Angebot',
+    statuses: ['offer'],
+    dot: 'bg-indigo-500',
+    ring: 'ring-indigo-200',
+    activeBg: 'bg-indigo-600 text-white border-indigo-600',
+    activeText: 'text-indigo-700',
+    icon: FileText,
+  },
+  {
+    key: 'closed',
+    label: 'Erledigt',
+    statuses: ['closed'],
+    dot: 'bg-emerald-500',
+    ring: 'ring-emerald-200',
+    activeBg: 'bg-emerald-600 text-white border-emerald-600',
+    activeText: 'text-emerald-700',
+    icon: CheckCircle2,
+  },
+  {
+    key: 'canceled',
+    label: 'Abgebrochen',
+    statuses: ['no_interest', 'wrong_data', 'canceled'],
+    dot: 'bg-slate-500',
+    ring: 'ring-slate-200',
+    activeBg: 'bg-slate-700 text-white border-slate-700',
+    activeText: 'text-slate-600',
+    icon: Ban,
+  },
+]
+
+function getActiveCategory(statusFilter: LeadStatus[]): CategoryKey {
+  if (statusFilter.length === 0) return 'all'
+  for (const cat of CATEGORIES) {
+    if (cat.key === 'all') continue
+    const s = new Set(statusFilter)
+    const c = new Set(cat.statuses)
+    if (s.size === c.size && [...s].every((x) => c.has(x))) return cat.key
+  }
+  return 'all'
+}
 
 export default async function AdminLeadsPage({
   searchParams,
@@ -53,18 +145,42 @@ export default async function AdminLeadsPage({
     from?: string
     to?: string
     hold?: string
+    sort?: string
+    dir?: 'asc' | 'desc'
     page?: string
+    pageSize?: string
+    product?: string
+    source?: string
   }
 }) {
   await requireAdmin()
   const q = searchParams.q ?? ''
-  const statuses = searchParams.status
+  const statusFilter = searchParams.status
     ? (searchParams.status.split(',').filter(Boolean) as LeadStatus[])
+    : []
+  const productFilter = searchParams.product
+    ? (searchParams.product.split(',').filter(Boolean) as ProductType[])
     : []
   const availability = (searchParams.availability as any) ?? undefined
   const sellerId = searchParams.seller || undefined
   const holdRaw = searchParams.hold ?? ''
-  const page = Number(searchParams.page ?? '1') || 1
+  const sourceFilter = searchParams.source || undefined
+
+  const rawSort = searchParams.sort ?? 'created_at_desc'
+  const lastUnderscore = rawSort.lastIndexOf('_')
+  const parsedSortBy = lastUnderscore > 0 ? rawSort.slice(0, lastUnderscore) : 'created_at'
+  const parsedSortDir = lastUnderscore > 0 ? rawSort.slice(lastUnderscore + 1) : 'desc'
+  const sortBy = (['created_at', 'assigned_at', 'status', 'updated_at'].includes(parsedSortBy)
+    ? parsedSortBy
+    : 'created_at') as string
+  const sortDir = (parsedSortDir === 'asc' || parsedSortDir === 'desc'
+    ? parsedSortDir
+    : 'desc') as 'asc' | 'desc'
+
+  const page = Math.max(1, Number(searchParams.page ?? '1') || 1)
+  const parsedPageSize = Number(searchParams.pageSize ?? '25') || 25
+  const pageSize = ALL_PAGE_SIZES.includes(parsedPageSize as any) ? parsedPageSize : 25
+
   const sellers = (await getAllSellers()) as any[] ?? []
   const campaigns = (await getAllCampaigns()) as any[] ?? []
 
@@ -73,18 +189,22 @@ export default async function AdminLeadsPage({
 
   const res = await adminGetAllLeads({
     search: q || undefined,
-    statuses: statuses.length > 0 ? statuses : undefined,
+    statuses: statusFilter.length > 0 ? statusFilter : undefined,
     availability,
     sellerId,
     from: searchParams.from || undefined,
     to: searchParams.to || undefined,
     isOnHold: isOnHoldFilter,
     page,
-    pageSize: 25,
+    pageSize,
+    sortBy,
+    sortDir,
+    product: productFilter.length > 0 ? productFilter : undefined,
+    source: sourceFilter || undefined,
   })
 
-  const totalPages = Math.max(1, Math.ceil(res.count / 25))
-  const statusList: LeadStatus[] = [
+  const totalPages = Math.max(1, Math.ceil(res.count / pageSize))
+  const statuses: LeadStatus[] = [
     'new',
     'assigned',
     'contacted',
@@ -95,242 +215,292 @@ export default async function AdminLeadsPage({
     'wrong_data',
     'canceled',
   ]
+  const products: ProductType[] = ['strom', 'gas', 'beides']
+  const sources: string[] = Object.keys(SOURCE_LABELS)
 
-  const statusFilter = statuses
-  const hasFilter = Boolean(
-    q || statusFilter.length > 0 || availability || sellerId || searchParams.from || searchParams.to || holdRaw,
-  )
+  const activeCategory = getActiveCategory(statusFilter)
+
+  const activeChips: Array<{ label: string; clearQs: Record<string, string | undefined> }> = []
+  if (q) {
+    activeChips.push({
+      label: `Suche: "${q}"`,
+      clearQs: { q: undefined },
+    })
+  }
+  if (productFilter.length > 0) {
+    for (const p of productFilter) {
+      activeChips.push({
+        label: `Produkt: ${PRODUCT_LABELS[p]}`,
+        clearQs: {
+          product: productFilter.filter((x) => x !== p).join(',') || undefined,
+        },
+      })
+    }
+  }
+  if (activeCategory === 'all') {
+    for (const s of statusFilter) {
+      activeChips.push({
+        label: `Status: ${LEAD_STATUS_LABELS[s]}`,
+        clearQs: {
+          status: statusFilter.filter((x) => x !== s).join(',') || undefined,
+        },
+      })
+    }
+  }
+  if (availability) {
+    activeChips.push({
+      label: `Verfügbarkeit: ${availability === 'available' ? 'Verfügbar' : 'Zugewiesen'}`,
+      clearQs: { availability: undefined },
+    })
+  }
+  if (sellerId) {
+    const seller = sellers.find((s) => s.id === sellerId)
+    const label = seller
+      ? `Verkäufer: ${seller.full_name ?? seller.email}`
+      : `Verkäufer: ${sellerId}`
+    activeChips.push({
+      label,
+      clearQs: { seller: undefined },
+    })
+  }
+  if (holdRaw) {
+    activeChips.push({
+      label: holdRaw === 'on' ? 'Nur Hold' : 'Ohne Hold',
+      clearQs: { hold: undefined },
+    })
+  }
+  if (sourceFilter) {
+    activeChips.push({
+      label: `Quelle: ${SOURCE_LABELS[sourceFilter as keyof typeof SOURCE_LABELS] ?? sourceFilter}`,
+      clearQs: { source: undefined },
+    })
+  }
+  if (searchParams.from) {
+    activeChips.push({
+      label: `Von: ${searchParams.from}`,
+      clearQs: { from: undefined },
+    })
+  }
+  if (searchParams.to) {
+    activeChips.push({
+      label: `Bis: ${searchParams.to}`,
+      clearQs: { to: undefined },
+    })
+  }
+
+  const sortFields: Array<{ id: string; label: string }> = [
+    { id: 'created_at_desc', label: 'Erstellt (neueste)' },
+    { id: 'created_at_asc', label: 'Erstellt (älteste)' },
+    { id: 'assigned_at_desc', label: 'Zugewiesen (neueste)' },
+    { id: 'assigned_at_asc', label: 'Zugewiesen (älteste)' },
+    { id: 'status_desc', label: 'Status (A→Z)' },
+    { id: 'updated_at_desc', label: 'Aktualisiert (neueste)' },
+  ]
+
+  const currentSortId = rawSort
+  const hasAnyFilter = activeChips.length > 0
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <PageHeader
-        breadcrumb={[
-          { label: 'Admin', href: '/admin/dashboard' },
-          { label: 'Leads', href: '/admin/leads' },
-        ]}
         title="Leads verwalten"
         description={`${res.count} Leads im System. Alle Verkäufer und unvergebene Leads im Überblick.`}
+        breadcrumb={[
+          { label: 'Admin', href: '/admin/dashboard' },
+          { label: 'Leads' },
+        ]}
         actions={<CreateLeadDialog campaigns={campaigns} sellers={sellers} />}
       />
 
-      <Card className="border-slate-200 bg-white shadow-sm">
-        <CardContent className="p-4 sm:p-5">
-          <form action="/admin/leads" method="get" className="flex flex-col gap-4">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
-              <div className="relative md:col-span-4">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input
-                  name="q"
-                  defaultValue={q}
-                  placeholder="Suche: Name, Telefon, E-Mail, Lead-ID…"
-                  className="pl-9"
-                />
-              </div>
-              <AdminLeadFilterClient
-                statuses={statusList}
-                sellers={sellers}
-                initialStatus={searchParams.status ?? 'all'}
-                initialAvailability={availability ?? 'all'}
-                initialSeller={sellerId ?? 'all'}
-              />
-              <div className="md:col-span-2 space-y-1.5">
-                <label className="text-xs font-medium text-slate-600">Hold</label>
-                <select
-                  name="hold"
-                  defaultValue={holdRaw}
-                  className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-900/10"
-                >
-                  <option value="">Alle</option>
-                  <option value="off">Aktiv (nicht auf Eis)</option>
-                  <option value="on">Auf Eis gelegt</option>
-                </select>
-              </div>
-              <div className="md:col-span-3 flex items-end gap-2">
-                <Input type="date" name="from" defaultValue={searchParams.from} className="w-auto" />
-                <span className="text-slate-400 text-sm">bis</span>
-                <Input type="date" name="to" defaultValue={searchParams.to} className="w-auto" />
-              </div>
-            </div>
-            <div className="flex items-center justify-between border-t border-slate-100 pt-3">
-              <div className="text-xs text-slate-500">
-                {hasFilter ? (
-                  <Link
-                    href="/admin/leads"
-                    className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-700 hover:underline"
-                  >
-                    <X className="h-3 w-3" /> Filter zurücksetzen
-                  </Link>
-                ) : <span>&nbsp;</span>}
-              </div>
-              <div className="flex items-center gap-2">
-                <Button type="submit" size="sm" variant="default">
-                  <Filter className="h-3.5 w-3.5" /> Filtern
-                </Button>
-              </div>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card className="border-slate-200 bg-white shadow-sm overflow-hidden">
-        <TooltipProvider>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Lead</TableHead>
-                <TableHead>Produkt</TableHead>
-                <TableHead>Quelle</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden md:table-cell">Alter</TableHead>
-                <TableHead className="hidden lg:table-cell">Verkäufer</TableHead>
-                <TableHead className="hidden xl:table-cell">Erstellt</TableHead>
-                <TableHead className="text-right">Aktionen</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {res.data.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={8}>
-                    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center m-4">
-                      <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400">
-                        <Layers className="h-4 w-4" />
-                      </div>
-                      <div className="text-sm font-medium text-slate-800">Keine Leads gefunden</div>
-                      <div className="mt-1 text-xs text-slate-500 max-w-xs">
-                        Passe Filter an oder lege neue Leads an.
-                      </div>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              )}
-              {(res.data as any[]).map((lead) => {
-                const ageDays = formatDaysSince(lead.created_at)
+      <div className="space-y-4">
+        <Card className="border-slate-200 bg-white shadow-sm overflow-hidden">
+          <div className="border-b border-slate-100">
+            <div className="flex items-center gap-1 overflow-x-auto px-3 py-2 sm:px-4">
+              {CATEGORIES.map((cat) => {
+                const isActive = activeCategory === cat.key
+                const Icon = cat.icon
+                const href =
+                  cat.key === 'all'
+                    ? `/admin/leads${buildQueryString({ ...searchParams, status: undefined }, { page: undefined })}`
+                    : `/admin/leads${buildQueryString({ ...searchParams, status: cat.statuses.join(',') }, { page: undefined })}`
                 return (
-                  <TableRow key={lead.id} className={cn('group hover:bg-slate-50', lead.is_on_hold && 'opacity-70')}>
-                    <TableCell>
-                      <Link href={`/leads/${lead.id}`} className="block">
-                        <div className="flex items-start gap-2">
-                          {lead.is_on_hold && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="mt-0.5 inline-flex items-center text-sky-600">
-                                  <Snowflake className="h-3.5 w-3.5" />
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent side="right">
-                                <div className="text-xs">
-                                  <div className="font-medium text-slate-900">Auf Eis gelegt</div>
-                                  {lead.hold_notes && (
-                                    <div className="text-slate-600 mt-1 max-w-xs whitespace-pre-wrap">{lead.hold_notes}</div>
-                                  )}
-                                </div>
-                              </TooltipContent>
-                            </Tooltip>
-                          )}
-                          <div className="min-w-0">
-                            <div className="font-medium text-slate-900 group-hover:text-slate-950">
-                              {lead.first_name} {lead.last_name}
-                            </div>
-                            <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-2">
-                              <PhoneLink phone={lead.phone}>
-                                {formatPhone(lead.phone)}
-                              </PhoneLink>
-                              {lead.email && (
-                                <span className="truncate max-w-[160px]">{lead.email}</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm text-slate-700">{PRODUCT_LABELS[lead.product as keyof typeof PRODUCT_LABELS]}</span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-slate-500">
-                        {SOURCE_LABELS[lead.source as keyof typeof SOURCE_LABELS]}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <LeadStatusBadge status={lead.status} />
-                      </div>
-                    </TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      <span className={cn('text-sm font-medium tabular-nums', leadAgeClass(ageDays))}>
-                        {ageDays === null ? '-' : `${ageDays} Tage`}
-                      </span>
-                    </TableCell>
-                    <TableCell className="hidden lg:table-cell">
-                      {lead.assigned_user ? (
-                        <span className="inline-flex items-center gap-1.5 text-sm text-slate-700">
-                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 text-[10px] font-semibold text-slate-600">
-                            {(lead.assigned_user.full_name ?? '?').slice(0, 1).toUpperCase()}
-                          </div>
-                          {lead.assigned_user.full_name ?? lead.assigned_user.email}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-slate-400">Verfügbar</span>
+                  <Link
+                    key={cat.key}
+                    href={href}
+                    className={cn(
+                      'relative inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all',
+                      isActive
+                        ? `${cat.activeBg} shadow-sm`
+                        : `border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900 ${cat.activeText}`,
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'inline-flex h-1.5 w-1.5 rounded-full ring-2 ring-offset-0.5',
+                        cat.dot,
+                        isActive ? 'ring-white/30' : cat.ring,
                       )}
-                    </TableCell>
-                    <TableCell className="hidden xl:table-cell text-xs text-slate-500">
-                      {formatDate(lead.created_at)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link href={`/leads/${lead.id}`}>Öffnen</Link>
-                        </Button>
-                        <HoldLeadDialog leadId={lead.id} isOnHold={lead.is_on_hold} currentNotes={lead.hold_notes} />
-                        {!lead.assigned_user_id ? (
-                          <AssignLeadDialog leadId={lead.id} sellers={sellers} />
-                        ) : (
-                          <ResetLeadDialog leadId={lead.id} />
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                    />
+                    <Icon className="h-3.5 w-3.5" />
+                    <span>{cat.label}</span>
+                  </Link>
                 )
               })}
-            </TableBody>
-          </Table>
-        </TooltipProvider>
-
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-slate-100 px-5 py-3">
-            <div className="text-xs text-slate-500">
-              Seite {page} / {totalPages} · {res.count} Leads
-            </div>
-            <div className="flex items-center gap-1">
-              {page > 1 ? (
-                <Button size="sm" variant="ghost" asChild>
-                  <Link href={`/admin/leads${buildQueryString(searchParams, { page: page - 1 })}`}>
-                    <ChevronLeft className="h-4 w-4" />
-                  </Link>
-                </Button>
-              ) : (
-                <Button size="sm" variant="ghost" disabled>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-              )}
-              <div className="px-2 text-xs font-medium text-slate-600">
-                {page} / {totalPages}
-              </div>
-              {page < totalPages ? (
-                <Button size="sm" variant="ghost" asChild>
-                  <Link href={`/admin/leads${buildQueryString(searchParams, { page: page + 1 })}`}>
-                    <ChevronRight className="h-4 w-4" />
-                  </Link>
-                </Button>
-              ) : (
-                <Button size="sm" variant="ghost" disabled>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-              )}
             </div>
           </div>
-        )}
-      </Card>
+
+          <CardContent className="p-3 sm:p-4">
+            <form action="/admin/leads" method="get" className="flex flex-col gap-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
+                <div className="md:col-span-5 lg:col-span-5 relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <Input
+                    name="q"
+                    defaultValue={q}
+                    placeholder="Suche nach Name, Telefon, E-Mail, Lead-ID…"
+                    className="pl-9 h-10 text-sm"
+                  />
+                </div>
+
+                <AdminLeadFilterClient
+                  statuses={statuses}
+                  sellers={sellers}
+                  products={products}
+                  sources={sources}
+                  initialStatus={searchParams.status ?? 'all'}
+                  initialAvailability={availability ?? 'all'}
+                  initialSeller={sellerId ?? 'all'}
+                  initialProduct={searchParams.product ?? 'all'}
+                  initialSource={searchParams.source ?? 'all'}
+                  initialHold={holdRaw}
+                />
+
+                <div className="md:col-span-2 space-y-1.5">
+                  <label className="block text-xs font-medium text-slate-600">Hold</label>
+                  <Select
+                    name="hold"
+                    defaultValue={holdRaw}
+                  >
+                    <SelectTrigger className="h-10 w-full border-slate-200 bg-white text-sm">
+                      <SelectValue placeholder="Hold" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="" className="text-xs">Alle</SelectItem>
+                      <SelectItem value="off" className="text-xs">Aktiv (nicht auf Eis)</SelectItem>
+                      <SelectItem value="on" className="text-xs">Auf Eis gelegt</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="md:col-span-3 lg:col-span-2 flex items-end gap-2">
+                  <div className="flex flex-1 items-center gap-1.5 text-xs text-slate-500">
+                    <ArrowUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <Select
+                      name="sort"
+                      defaultValue={
+                        sortFields.find((f) => f.id === currentSortId)
+                          ? currentSortId
+                          : 'created_at_desc'
+                      }
+                    >
+                      <SelectTrigger className="h-10 w-full border-slate-200 bg-white text-sm">
+                        <SelectValue placeholder="Sortieren nach" />
+                      </SelectTrigger>
+                      <SelectContent align="end">
+                        {sortFields.map((f) => (
+                          <SelectItem key={f.id} value={f.id} className="text-xs">
+                            {f.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between rounded-xl border border-slate-100 bg-slate-50/60 p-3 sm:p-3.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+                    <Calendar className="h-3.5 w-3.5" /> Zeitraum
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Input
+                      type="date"
+                      name="from"
+                      defaultValue={searchParams.from}
+                      className="h-9 w-[150px] text-xs sm:text-sm"
+                    />
+                    <span className="text-xs text-slate-400">bis</span>
+                    <Input
+                      type="date"
+                      name="to"
+                      defaultValue={searchParams.to}
+                      className="h-9 w-[150px] text-xs sm:text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  {hasAnyFilter ? (
+                    <Link
+                      href="/admin/leads"
+                      className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Zurücksetzen
+                    </Link>
+                  ) : null}
+                  <Button type="submit" size="sm" variant="default" className="h-9 min-w-[110px]">
+                    <Search className="h-3.5 w-3.5" />
+                    <span className="ml-1">Filter anwenden</span>
+                  </Button>
+                </div>
+              </div>
+
+              {activeChips.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10.5px] font-semibold uppercase tracking-widest text-slate-400">
+                    Aktiv:
+                  </span>
+                  {activeChips.map((chip, i) => {
+                    const href = `/admin/leads${buildQueryString(
+                      { ...searchParams, ...chip.clearQs },
+                      { page: undefined },
+                    )}`
+                    return (
+                      <Link
+                        key={i}
+                        href={href}
+                        className="inline-flex min-h-[26px] items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[10.5px] font-medium text-slate-700 shadow-sm hover:bg-slate-50 hover:text-slate-900"
+                      >
+                        {chip.label}
+                        <X className="h-3 w-3 text-slate-400" />
+                      </Link>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </form>
+          </CardContent>
+        </Card>
+
+        <Suspense
+          fallback={
+            <div className="space-y-3">
+              <AdminLeadTableSkeleton />
+            </div>
+          }
+        >
+          <AdminLeadTableView
+            data={res.data as any}
+            count={res.count}
+            page={Math.min(page, totalPages)}
+            pageSize={pageSize}
+            searchParams={searchParams as any}
+            sellers={sellers as any}
+          />
+        </Suspense>
+      </div>
     </div>
   )
 }

@@ -73,6 +73,7 @@ const STATUS_ACCENT: Record<LeadStatus, string> = {
   no_interest: 'bg-red-500',
   wrong_data: 'bg-red-500',
   canceled: 'bg-slate-500',
+  archived: 'bg-slate-400',
 }
 
 const STATUS_SOFT_BG: Record<LeadStatus, string> = {
@@ -85,6 +86,7 @@ const STATUS_SOFT_BG: Record<LeadStatus, string> = {
   no_interest: 'bg-red-50/30',
   wrong_data: 'bg-red-50/30',
   canceled: 'bg-slate-50',
+  archived: 'bg-slate-50',
 }
 
 export function LeadTableView({
@@ -221,6 +223,15 @@ export function LeadTableView({
           const staggerDelay = Math.min(600, 40 + idx * 40)
           const statusKey = lead.status as LeadStatus
           const detailUrl = `/leads/${lead.id}`
+
+          const lastContactDays = leadAny.last_contact_at ? formatDaysSince(leadAny.last_contact_at) : null
+          const openCallbackOverdue = !!leadAny.next_callback_at && new Date(leadAny.next_callback_at).getTime() < Date.now() - 60_000
+          const isUrgent =
+            openCallbackOverdue ||
+            (statusKey === 'new' && ageDays !== null && ageDays >= 2) ||
+            (lastContactDays !== null && lastContactDays >= 10) ||
+            (statusKey === 'callback' && openCallbackOverdue)
+
           return (
             <div
               key={lead.id}
@@ -242,6 +253,7 @@ export function LeadTableView({
                 'transition-all duration-200 ease-out',
                 'hover:-translate-y-0.5 hover:shadow-md hover:border-slate-300',
                 STATUS_SOFT_BG[statusKey] ?? 'bg-white',
+                isUrgent && 'urgent-card-hover ring-1 ring-amber-300/40',
               )}
               style={{ animationDelay: `${staggerDelay}ms` }}
             >
@@ -453,6 +465,73 @@ export function LeadTableView({
 
 type InlineField = 'name' | 'first_name' | 'last_name' | 'phone' | 'email'
 
+const EMAIL_DOMAINS = [
+  'gmail.com',
+  'googlemail.com',
+  'outlook.com',
+  'hotmail.de',
+  'hotmail.com',
+  'live.de',
+  'web.de',
+  'gmx.de',
+  'gmx.net',
+  'gmx.at',
+  'icloud.com',
+  'me.com',
+  'yahoo.de',
+  't-online.de',
+  'aol.de',
+  'freenet.de',
+  'arcor.de',
+  'mail.de',
+]
+
+function EmailSuggestDropdown({
+  draft,
+  onPick,
+  visible,
+}: {
+  draft: string
+  onPick: (complete: string) => void
+  visible: boolean
+}) {
+  if (!visible) return null
+  const atIdx = draft.lastIndexOf('@')
+  if (atIdx < 0) return null
+  const localPart = draft.slice(0, atIdx)
+  const partialDomain = draft.slice(atIdx + 1).toLowerCase()
+  if (!localPart) return null
+
+  const matches = EMAIL_DOMAINS.filter((d) =>
+    partialDomain ? d.startsWith(partialDomain) : true,
+  ).slice(0, 6)
+  if (matches.length === 0) return null
+
+  return (
+    <div
+      className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      {matches.map((d, i) => (
+        <button
+          type="button"
+          key={d}
+          className={cn(
+            'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition',
+            i === 0 ? 'bg-slate-50' : 'hover:bg-slate-50',
+          )}
+          onClick={() => onPick(`${localPart}@${d}`)}
+        >
+          <Mail className="h-3 w-3 text-slate-400" />
+          <span className="text-slate-700 truncate">
+            <span className="text-slate-500">{localPart}</span>@{d}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function InlineEditCell({
   leadId,
   field,
@@ -475,6 +554,7 @@ function InlineEditCell({
   const [validState, setValidState] = useState<'idle' | 'valid' | 'invalid'>('idle')
   const inputRef = useRef<HTMLInputElement>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const showEmailSuggest = inputType === 'email' && editing && draft.includes('@')
 
   const [state, formAction] = useFormState(async (_prev: any, fd: FormData) => {
     const res = (await updateLeadInlineAction(fd)) as any
@@ -609,24 +689,36 @@ function InlineEditCell({
         }}
         className="flex items-center gap-1"
       >
-        <input
-          ref={inputRef}
-          type={inputType}
-          value={draft}
-          onChange={(e) => {
-            setDraft(e.target.value)
-            validate(e.target.value)
-          }}
-          className={cn(
-            'w-full h-8 rounded-md border px-2 text-xs outline-none transition-all',
-            'bg-white text-slate-900 shadow-sm',
-            validState === 'valid' && 'field-valid',
-            validState === 'invalid' && 'field-invalid',
-            validState === 'idle' && 'border-slate-300 focus:border-slate-500 focus:ring-2 focus:ring-slate-950/10',
-          )}
-          placeholder={inputType === 'email' ? 'name@domain.de' : inputType === 'tel' ? '+49 ...' : 'Wert eingeben…'}
-          onClick={(e) => e.stopPropagation()}
-        />
+        <div className="relative flex-1">
+          <input
+            ref={inputRef}
+            type={inputType}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value)
+              validate(e.target.value)
+            }}
+            className={cn(
+              'w-full h-8 rounded-md border px-2 text-xs outline-none transition-all',
+              'bg-white text-slate-900 shadow-sm',
+              validState === 'valid' && 'field-valid',
+              validState === 'invalid' && 'field-invalid',
+              validState === 'idle' && 'border-slate-300 focus:border-slate-500 focus:ring-2 focus:ring-slate-950/10',
+            )}
+            placeholder={inputType === 'email' ? 'name@domain.de' : inputType === 'tel' ? '+49 ...' : 'Wert eingeben…'}
+            onClick={(e) => e.stopPropagation()}
+            autoComplete={inputType === 'email' ? 'email' : inputType === 'tel' ? 'tel' : 'off'}
+          />
+          <EmailSuggestDropdown
+            draft={draft}
+            onPick={(v) => {
+              setDraft(v)
+              validate(v)
+              inputRef.current?.focus()
+            }}
+            visible={!!showEmailSuggest}
+          />
+        </div>
         <button
           type="submit"
           aria-label="Speichern"

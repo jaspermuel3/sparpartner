@@ -10,6 +10,7 @@ export type LeadStatus =
   | 'no_interest'
   | 'wrong_data'
   | 'canceled'
+  | 'archived'
 
 export type ProductType = 'strom' | 'gas' | 'beides'
 
@@ -19,6 +20,7 @@ export type LeadSource =
   | 'manual'
   | 'import'
   | 'empfehlung'
+  | 'landing_page'
   | 'sonstiges'
 
 export type ContactResult =
@@ -58,6 +60,10 @@ export type AuditActionType =
   | 'CALLBACK_UPDATED'
   | 'DOCUMENT_UPLOADED'
   | 'TAG_ASSIGNED'
+  | 'LEAD_DELETED'
+  | 'LEAD_CANCEL_REQUEST'
+  | 'LEAD_CANCEL_APPROVED'
+  | 'LEAD_CANCEL_REJECTED'
 
 export interface Team {
   id: string
@@ -131,6 +137,7 @@ export interface ContactAttempt {
   attempt_date: string
   result: ContactResult
   notes: string | null
+  call_duration_seconds: number | null
   created_at: string
 }
 

@@ -31,7 +31,7 @@ export const CampaignDialogs = {
   Edit: EditCampaignDialog,
 }
 
-function CreateCampaignDialog({ campaigns }: { campaigns?: any[] }) {
+export function CreateCampaignDialog({ campaigns }: { campaigns?: any[] }) {
   const [open, setOpen] = useState(false)
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
     async (_, fd) => {
@@ -115,7 +115,7 @@ function CreateCampaignDialog({ campaigns }: { campaigns?: any[] }) {
   )
 }
 
-function EditCampaignDialog({ campaign }: { campaign: any }) {
+export function EditCampaignDialog({ campaign }: { campaign: any }) {
   const [open, setOpen] = useState(false)
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
     async (_, fd) => {

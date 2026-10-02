@@ -10,6 +10,7 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   no_interest: 'Kein Interesse',
   wrong_data: 'Falsche Daten',
   canceled: 'Storniert',
+  archived: 'Archiviert',
 }
 
 export const LEAD_STATUS_VARIANTS: Record<LeadStatus, 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'> = {
@@ -22,6 +23,7 @@ export const LEAD_STATUS_VARIANTS: Record<LeadStatus, 'default' | 'secondary' | 
   no_interest: 'destructive',
   wrong_data: 'destructive',
   canceled: 'secondary',
+  archived: 'secondary',
 }
 
 export const LEAD_STATUS_CLASSES: Record<LeadStatus, string> = {
@@ -34,6 +36,23 @@ export const LEAD_STATUS_CLASSES: Record<LeadStatus, string> = {
   no_interest: 'bg-red-50 text-red-700 border-red-200',
   wrong_data: 'bg-red-50 text-red-700 border-red-200',
   canceled: 'bg-slate-100 text-slate-500 border-slate-200',
+  archived: 'bg-slate-50 text-slate-500 border-slate-200',
+}
+
+export const STATUS_COLORS: Record<
+  string,
+  { bg: string; text: string; dot: string; ring?: string }
+> = {
+  new: { bg: 'bg-slate-100', text: 'text-slate-700', dot: 'bg-slate-500' },
+  assigned: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500' },
+  contacted: { bg: 'bg-amber-50', text: 'text-amber-700', dot: 'bg-amber-500' },
+  callback: { bg: 'bg-orange-50', text: 'text-orange-700', dot: 'bg-orange-500' },
+  offer: { bg: 'bg-indigo-50', text: 'text-indigo-700', dot: 'bg-indigo-500' },
+  closed: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+  no_interest: { bg: 'bg-red-50', text: 'text-red-700', dot: 'bg-red-500' },
+  wrong_data: { bg: 'bg-red-50', text: 'text-red-700', dot: 'bg-red-500' },
+  canceled: { bg: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400' },
+  archived: { bg: 'bg-slate-50', text: 'text-slate-500', dot: 'bg-slate-400' },
 }
 
 export const PRODUCT_LABELS: Record<ProductType, string> = {
@@ -48,6 +67,7 @@ export const SOURCE_LABELS: Record<LeadSource, string> = {
   manual: 'Manuell',
   import: 'Import',
   empfehlung: 'Empfehlung',
+  landing_page: 'Landing Page',
   sonstiges: 'Sonstiges',
 }
 
@@ -104,6 +124,10 @@ export const AUDIT_ACTION_LABELS: Record<AuditActionType, string> = {
   CALLBACK_UPDATED: 'Rückruf aktualisiert',
   DOCUMENT_UPLOADED: 'Dokument hochgeladen',
   TAG_ASSIGNED: 'Tag zugewiesen',
+  LEAD_DELETED: 'Lead gelöscht (Admin)',
+  LEAD_CANCEL_REQUEST: 'Lead-Storno angefordert (Verkäufer)',
+  LEAD_CANCEL_APPROVED: 'Lead-Storno genehmigt (Admin)',
+  LEAD_CANCEL_REJECTED: 'Lead-Storno abgelehnt (Admin)',
 }
 
 export const formatDate = (iso: string | null | undefined): string => {
@@ -168,6 +192,31 @@ export const phoneHref = (phone: string | null | undefined): string => {
     digits = digits.slice(2)
   }
   return `tel:+${digits}`
+}
+
+/**
+ * Formatiert Sekunden als Gesprächszeit (mm:ss, bei ≥ 1 Stunde h:mm:ss).
+ * @param seconds
+ */
+export const formatCallDuration = (seconds: number | null | undefined): string | null => {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds) || seconds <= 0) return null
+  const s = Math.max(0, Math.round(Number(seconds)))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  }
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+}
+
+export const formatCallDurationLong = (seconds: number | null | undefined): string | null => {
+  const short = formatCallDuration(seconds)
+  if (!short) return null
+  const s = Math.max(0, Math.round(Number(seconds ?? 0)))
+  if (s < 60) return `${s} Sek.`
+  const min = (s / 60).toFixed(1).replace('.', ',')
+  return `${short} · ${min} Min.`
 }
 
 export const formatCurrency = (n: number | null | undefined): string => {

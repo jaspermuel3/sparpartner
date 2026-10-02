@@ -1,33 +1,8 @@
 'use client'
 
 import { Suspense, useEffect, useMemo, useState, useTransition } from 'react'
-import { Eye, EyeOff, Loader2, ShieldCheck, UserCircle2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
-
-type DemoAccount = {
-  key: 'seller' | 'admin'
-  label: string
-  email: string
-  password: string
-  hint: string
-}
-
-const DEMO_ACCOUNTS: DemoAccount[] = [
-  {
-    key: 'seller',
-    label: 'Vertrieb',
-    email: 'seller@test.local',
-    password: 'seller1234',
-    hint: 'Seller · Token-basierter Lead-Zugriff',
-  },
-  {
-    key: 'admin',
-    label: 'Admin',
-    email: 'admin@test.local',
-    password: 'admin1234',
-    hint: 'Admin · Kampagnen, Teams & Auswertungen',
-  },
-]
 
 function LoginFormInner() {
   const searchParams = useSearchParams()
@@ -70,57 +45,11 @@ function LoginFormInner() {
       return
     }
     setLocalError(null)
-    startTransition(() => {
-      // native submit; submit Button deaktivieren bis Antwort kommt
-    })
-  }
-
-  function fillDemo(acc: DemoAccount) {
-    setEmail(acc.email)
-    setPassword(acc.password)
-    setLocalError(null)
+    startTransition(() => {})
   }
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3">
-        {DEMO_ACCOUNTS.map((acc) => {
-          const active = email === acc.email && password === acc.password
-          return (
-            <button
-              key={acc.key}
-              type="button"
-              onClick={() => fillDemo(acc)}
-              className={
-                'group relative flex min-h-[72px] flex-col items-start justify-between gap-1 rounded-xl border p-3 text-left transition-all ' +
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2 ' +
-                (active
-                  ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
-                  : 'border-slate-200 bg-white text-slate-900 hover:border-slate-300 hover:bg-slate-50')
-              }
-            >
-              <div className="flex w-full items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-tight">
-                  {acc.key === 'admin' ? (
-                    <ShieldCheck className={'h-3.5 w-3.5 ' + (active ? 'text-sky-300' : 'text-slate-500')} />
-                  ) : (
-                    <UserCircle2 className={'h-3.5 w-3.5 ' + (active ? 'text-emerald-300' : 'text-slate-500')} />
-                  )}
-                  {acc.label}
-                </span>
-                <span className={'rounded-md px-1.5 py-0.5 text-[10px] font-medium ' +
-                  (active ? 'bg-white/10 text-white/80' : 'bg-slate-100 text-slate-500')}>
-                  Demo
-                </span>
-              </div>
-              <p className={'text-[11px] leading-snug ' + (active ? 'text-white/70' : 'text-slate-500')}>
-                {acc.hint}
-              </p>
-            </button>
-          )
-        })}
-      </div>
-
       <form
         method="POST"
         action="/api/auth/login"
@@ -247,7 +176,7 @@ function LoginFormInner() {
 
       <div className="border-t border-slate-200/70 pt-4">
         <p className="text-center text-[11px] leading-relaxed text-slate-400">
-          Demo-Zugänge vorkonfiguriert. Klick oben auf eine Karte, um Felder zu befüllen.
+          Gib deine Zugangsdaten ein. Bei Problemen wende dich an deinen Administrator.
         </p>
       </div>
     </div>
@@ -259,10 +188,6 @@ export function LoginForm() {
     <Suspense
       fallback={
         <div className="space-y-5">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="h-[72px] rounded-xl border border-slate-200/60 bg-slate-100/60 animate-pulse" />
-            <div className="h-[72px] rounded-xl border border-slate-200/60 bg-slate-100/60 animate-pulse" />
-          </div>
           <div className="h-[88px] space-y-1.5">
             <div className="h-4 w-14 rounded bg-slate-100 animate-pulse" />
             <div className="min-h-[44px] w-full rounded-xl bg-slate-100 animate-pulse" />

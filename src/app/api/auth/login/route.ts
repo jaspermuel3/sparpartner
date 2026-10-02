@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getSupabaseUrl, getSupabaseAnonKey, stripBomAndWs } from '@/lib/supabase/_sanitize'
 
 function copyCookies(from: NextResponse, to: NextResponse) {
   for (const c of from.cookies.getAll()) {
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
     }
 
     const email = String(formData.get('email') ?? '').trim()
-    const password = String(formData.get('password') ?? '')
+    const password = stripBomAndWs(String(formData.get('password') ?? ''))
     const nextRaw = String(formData.get('next') ?? '/dashboard') || '/dashboard'
     const next = nextRaw.startsWith('/') ? nextRaw : '/dashboard'
 
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
 
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    if (!getSupabaseUrl() || !getSupabaseAnonKey()) {
       loginRedirect.searchParams.set('error', 'Server-Konfiguration unvollständig. Supabase-URL oder Anon-Key fehlen.')
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
@@ -43,8 +44,8 @@ export async function POST(request: NextRequest) {
     const admin = createAdminClient()
 
     const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+      getSupabaseUrl(),
+      getSupabaseAnonKey(),
       {
         cookies: {
           get(name: string) {

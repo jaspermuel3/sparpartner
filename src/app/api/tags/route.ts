@@ -1,14 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getSupabaseUrl, getSupabaseAnonKey } from '@/lib/supabase/_sanitize'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   try {
     const response = NextResponse.next({ request: { headers: request.headers } })
-    const anonUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    const anonUrl = getSupabaseUrl()
+    const anonKey = getSupabaseAnonKey()
     if (!anonUrl || !anonKey) {
       return NextResponse.json([])
     }

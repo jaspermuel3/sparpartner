@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
+import { getSupabaseUrl, getSupabaseAnonKey } from '@/lib/supabase/_sanitize'
 
 const PUBLIC_ROUTES = ['/login', '/auth/callback', '/api/auth', '/favicon.ico']
 const SALES_ROUTES_PREFIXES = ['/dashboard', '/request-lead', '/my-leads', '/callbacks', '/stats', '/settings', '/leads/']
@@ -14,8 +15,8 @@ function copyCookies(from: NextResponse, to: NextResponse) {
 }
 
 function createMiddlewareClient(request: NextRequest, response: NextResponse) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const url = getSupabaseUrl()
+  const key = getSupabaseAnonKey()
   if (!url || !key) return null as any
 
   return createServerClient(url, key, {
@@ -35,8 +36,8 @@ function createMiddlewareClient(request: NextRequest, response: NextResponse) {
 
 function clearAuthCookies(response: NextResponse) {
   const baseOpts = { httpOnly: true, sameSite: 'lax' as const, path: '/' }
-  const keyPrefix = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.slice(0, 20) ?? ''
-  const hostPrefix = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/^https?:\/\//, '').replace(/\./g, '-') ?? ''
+  const keyPrefix = getSupabaseAnonKey().slice(0, 20)
+  const hostPrefix = getSupabaseUrl().replace(/^https?:\/\//, '').replace(/\./g, '-')
   const names = [
     'sb-access-token',
     'sb-refresh-token',

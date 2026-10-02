@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { requireSeller } from '@/lib/auth'
 import {
   getSellerDashboardStats,
@@ -40,11 +41,28 @@ import {
   formatTime,
   phoneHref,
   formatRelative,
+  formatCallDuration,
+  formatCallDurationLong,
 } from '@/lib/constants'
 import { Suspense } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import type { Lead } from '@/types'
+
+const WorklistList = dynamic<{ items: WorklistItem[] }>(
+  () => Promise.resolve(WorklistListInline as any),
+  { ssr: false, loading: () => <WorklistSkeleton /> },
+)
+
+const ActivityList = dynamic<{ attempts: any[]; statuses: any[] }>(
+  () => Promise.resolve(ActivityListInline as any),
+  { ssr: false, loading: () => <ActivitySkeleton /> },
+)
+
+const CallbacksList = dynamic<{ callbacks: any[] }>(
+  () => Promise.resolve(CallbacksListInline as any),
+  { ssr: false, loading: () => <CallbacksSkeleton /> },
+)
 
 export default async function SellerDashboardPage() {
   const user = await requireSeller()
@@ -108,7 +126,7 @@ export default async function SellerDashboardPage() {
       />
 
       <Suspense fallback={<DashboardGridSkeleton />}>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <StatCard
             label="Token-Guthaben"
             value={stats.token_balance}
@@ -158,6 +176,21 @@ export default async function SellerDashboardPage() {
               )
             }
             accent={stats.callbacks_ueberfaellig > 0 ? 'danger' : 'warning'}
+          />
+          <StatCard
+            label="Gesprächszeit heute"
+            value={formatCallDuration(stats.talk_time?.today_seconds) ?? '00:00'}
+            hint={(() => {
+              const y = formatCallDuration(stats.talk_time?.yesterday_seconds) ?? '00:00'
+              const delta = stats.talk_time?.delta_vs_yesterday_pct
+              if (delta === undefined || delta === null) return `Gestern: ${y}`
+              const arrow = delta >= 0 ? '▲' : '▼'
+              return `Gestern: ${y} · ${arrow} ${Math.abs(delta).toFixed(1)}%`
+            })()}
+            icon={<Clock className="h-4 w-4" />}
+            accent="brand"
+            trendValue={stats.talk_time?.delta_vs_yesterday_pct}
+            trendLabel="vs. gestern"
           />
         </div>
       </Suspense>
@@ -224,66 +257,7 @@ export default async function SellerDashboardPage() {
           }
         >
           <Suspense fallback={<CallbacksSkeleton />}>
-            <div className="space-y-2">
-              {callbacks.length === 0 && (
-                <EmptyState
-                  icon={<PhoneForwarded className="h-5 w-5 text-slate-400" />}
-                  title="Keine Rückrufe geplant"
-                  hint="Plane Rückrufe direkt in der Lead-Detailansicht."
-                />
-              )}
-              {callbacks.map((c: any) => {
-                const istUeberfaellig = new Date(c.callback_at).getTime() < Date.now()
-                return (
-                  <Link
-                    key={c.id}
-                    href={`/leads/${c.lead_id}`}
-                    className={cn(
-                      'group flex items-center gap-3 rounded-lg border bg-slate-50/50 p-3 transition hover:bg-white hover:shadow-sm',
-                      istUeberfaellig
-                        ? 'border-red-200 bg-red-50/40 hover:border-red-300 urgent-pulse'
-                        : 'border-slate-100 hover:border-slate-200',
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border',
-                        istUeberfaellig
-                          ? 'border-red-200 bg-red-50 text-red-600'
-                          : 'border-amber-200 bg-amber-50 text-amber-600',
-                      )}
-                    >
-                      {istUeberfaellig ? (
-                        <AlertCircle className="h-4 w-4" />
-                      ) : (
-                        <Clock className="h-4 w-4" />
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-slate-900">
-                        {c.lead?.first_name} {c.lead?.last_name}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <span>{formatDateShort(c.callback_at)}</span>
-                        <span>·</span>
-                        <span>{formatTime(c.callback_at)}</span>
-                        {istUeberfaellig && (
-                          <>
-                            <span>·</span>
-                            <span className="font-medium text-red-600">überfällig</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                    <CallButton
-                      phone={c.lead?.phone}
-                      className="ml-auto inline-flex h-9 w-9 min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-slate-200 text-slate-600 opacity-0 transition group-hover:opacity-100 hover:bg-slate-50"
-                    />
-                    <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:text-slate-600" />
-                  </Link>
-                )
-              })}
-            </div>
+            <CallbacksList callbacks={callbacks} />
           </Suspense>
         </CollapsibleCard>
       </div>
@@ -291,7 +265,7 @@ export default async function SellerDashboardPage() {
   )
 }
 
-function WorklistList({ items }: { items: WorklistItem[] }) {
+function WorklistListInline({ items }: { items: WorklistItem[] }) {
   if (items.length === 0) {
     return (
       <EmptyState
@@ -380,7 +354,7 @@ function formatDaysSince(iso: string | null | undefined): number | string {
   return Math.max(0, Math.floor((Date.now() - t) / 86_400_000))
 }
 
-function ActivityList({ attempts, statuses }: { attempts: any[]; statuses: any[] }) {
+function ActivityListInline({ attempts, statuses }: { attempts: any[]; statuses: any[] }) {
   const merged = [
     ...attempts.map((a: any) => ({
       type: 'attempt' as const,
@@ -409,12 +383,27 @@ function ActivityList({ attempts, statuses }: { attempts: any[]; statuses: any[]
       {merged.slice(0, 7).map((entry, idx) => {
         const firstName = entry.data.lead?.first_name
         const lastName = entry.data.lead?.last_name
+        const callDur =
+          entry.type === 'attempt'
+            ? formatCallDuration((entry.data as any).call_duration_seconds)
+            : null
+        const callDurLong =
+          entry.type === 'attempt'
+            ? formatCallDurationLong((entry.data as any).call_duration_seconds)
+            : null
         return (
           <li
             key={idx}
             className="card-hoverable flex items-start gap-3 rounded-lg border border-slate-100 bg-slate-50/40 p-3"
           >
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500">
+            <div
+              className={cn(
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-white text-slate-500',
+                entry.type === 'attempt' && callDur
+                  ? 'border-emerald-200 text-emerald-600'
+                  : 'border-slate-200',
+              )}
+            >
               {entry.type === 'attempt' ? (
                 <Phone className="h-3.5 w-3.5" />
               ) : (
@@ -433,23 +422,106 @@ function ActivityList({ attempts, statuses }: { attempts: any[]; statuses: any[]
                 >
                   {firstName} {lastName}
                 </Link>
+                {callDur && (
+                  <span className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                    <Clock className="h-3 w-3" />
+                    {callDur}
+                  </span>
+                )}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                 <span>{formatDate(entry.at)}</span>
+                <span className="text-slate-300">·</span>
+                <span>{formatTime(entry.at)}</span>
+                {callDurLong && (
+                  <>
+                    <span className="text-slate-300">·</span>
+                    <span className="font-medium text-emerald-700">Gesprächszeit {callDurLong}</span>
+                  </>
+                )}
                 {entry.type === 'attempt' ? (
                   <ContactResultPill result={entry.data.result} />
                 ) : (
                   <LeadStatusBadge status={entry.data.new_status as any} />
                 )}
-                {entry.type === 'attempt' && entry.data.notes && (
-                  <span className="text-slate-500">– {entry.data.notes}</span>
-                )}
               </div>
+              {entry.type === 'attempt' && entry.data.notes && (
+                <p className="mt-1.5 whitespace-pre-wrap text-xs leading-relaxed text-slate-600">
+                  {entry.data.notes}
+                </p>
+              )}
             </div>
           </li>
         )
       })}
     </ul>
+  )
+}
+
+function CallbacksListInline({ callbacks }: { callbacks: any[] }) {
+  if (callbacks.length === 0) {
+    return (
+      <EmptyState
+        icon={<PhoneForwarded className="h-5 w-5 text-slate-400" />}
+        title="Keine Rückrufe geplant"
+        hint="Plane Rückrufe direkt in der Lead-Detailansicht."
+      />
+    )
+  }
+  return (
+    <div className="space-y-2">
+      {callbacks.map((c: any) => {
+        const istUeberfaellig = new Date(c.callback_at).getTime() < Date.now()
+        return (
+          <Link
+            key={c.id}
+            href={`/leads/${c.lead_id}`}
+            className={cn(
+              'group flex items-center gap-3 rounded-lg border bg-slate-50/50 p-3 transition hover:bg-white hover:shadow-sm',
+              istUeberfaellig
+                ? 'border-red-200 bg-red-50/40 hover:border-red-300 urgent-pulse'
+                : 'border-slate-100 hover:border-slate-200',
+            )}
+          >
+            <div
+              className={cn(
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border',
+                istUeberfaellig
+                  ? 'border-red-200 bg-red-50 text-red-600'
+                  : 'border-amber-200 bg-amber-50 text-amber-600',
+              )}
+            >
+              {istUeberfaellig ? (
+                <AlertCircle className="h-4 w-4" />
+              ) : (
+                <Clock className="h-4 w-4" />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium text-slate-900">
+                {c.lead?.first_name} {c.lead?.last_name}
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <span>{formatDateShort(c.callback_at)}</span>
+                <span>·</span>
+                <span>{formatTime(c.callback_at)}</span>
+                {istUeberfaellig && (
+                  <>
+                    <span>·</span>
+                    <span className="font-medium text-red-600">überfällig</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <CallButton
+              phone={c.lead?.phone}
+              className="ml-auto inline-flex h-9 w-9 min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-slate-200 text-slate-600 opacity-0 transition group-hover:opacity-100 hover:bg-slate-50"
+            />
+            <ArrowRight className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:text-slate-600" />
+          </Link>
+        )
+      })}
+    </div>
   )
 }
 
@@ -475,8 +547,8 @@ function EmptyState({
 
 function DashboardGridSkeleton() {
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {Array.from({ length: 4 }).map((_, i) => (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <Skeleton className="mb-2 h-3 w-24" />
           <Skeleton className="mb-1 h-7 w-28" />

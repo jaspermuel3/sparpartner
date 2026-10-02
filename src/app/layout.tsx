@@ -9,8 +9,8 @@ import { NotificationsProvider } from '@/components/ui-custom/NotificationsProvi
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'Energie CRM',
-  description: 'CRM für Strom- und Gasvertrieb',
+  title: 'Sparpartner CRM',
+  description: 'CRM für Strom- und Gasvertrieb · Sparpartner24',
 }
 
 export default function RootLayout({

@@ -31,6 +31,9 @@ import {
   toggleLeadHold,
   createCampaign,
   updateCampaign,
+  adminSoftDeleteLead,
+  requestCancellation as svcRequestCancellation,
+  reviewCancellation as svcReviewCancellation,
 } from '@/lib/services/admin.service'
 import { logAudit } from '@/lib/audit'
 import {
@@ -74,6 +77,10 @@ const mapError = (err: unknown): { error: string } => {
     AMOUNT_MUST_BE_POSITIVE: 'Betrag muss größer 0 sein.',
     AUTH_CREATE_FAILED: 'Benutzer konnte nicht erstellt werden. (E-Mail evtl. bereits registriert?)',
     WAITLIST_INSERT_FAILED: 'Konnte nicht zur Warteliste hinzugefügt werden.',
+    NOT_YOUR_LEAD: 'Dieser Lead gehört dir nicht.',
+    ALREADY_REQUESTED: 'Für diesen Lead läuft bereits eine Stornierungsanfrage.',
+    REQUEST_NOT_FOUND: 'Anfrage nicht gefunden.',
+    ALREADY_REVIEWED: 'Anfrage wurde bereits bearbeitet.',
   }
   return { error: map[msg] ?? msg }
 }
@@ -298,6 +305,12 @@ export async function addContactAttemptAction(formData: FormData) {
     const dateInput = String(formData.get('date'))
     const timeInput = String(formData.get('time'))
     const notes = String(formData.get('notes') ?? '') || null
+    const callDurationRaw = formData.get('call_duration_seconds')
+    let callDurationSeconds: number | null = null
+    if (callDurationRaw !== null && callDurationRaw !== undefined && callDurationRaw !== '') {
+      const v = Number(callDurationRaw)
+      if (!Number.isNaN(v) && v > 0) callDurationSeconds = Math.max(0, Math.round(v))
+    }
 
     const iso = new Date(`${dateInput}T${timeInput}:00`).toISOString()
     const user = await requireUser()
@@ -307,6 +320,7 @@ export async function addContactAttemptAction(formData: FormData) {
       attempt_date: iso,
       result,
       notes,
+      call_duration_seconds: callDurationSeconds,
     })
     revalidatePath(`/leads/${leadId}`)
     revalidatePath('/dashboard')
@@ -938,6 +952,67 @@ export async function persistCallbackDueNotificationAction(_prev: any, formData:
     await notifyCallbackDue(user.id, leadId, leadName, callbackAt)
     revalidatePath('/dashboard')
     return { ok: true }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+/* ========= Lead-Löschen (Admin) + Storno (Seller → Admin) ========= */
+
+export async function adminDeleteLeadAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const leadId = String(formData.get('leadId'))
+    const reason = formData.get('reason') ? String(formData.get('reason')) : ''
+    await adminSoftDeleteLead(leadId, adminUser.id, reason)
+    revalidatePath('/admin/leads')
+    revalidatePath('/admin/dashboard')
+    revalidatePath('/admin/stats')
+    return {
+      ok: true,
+      toast: { title: 'Lead gelöscht', description: `#${leadId.slice(0, 8)}`, variant: 'success' as const },
+    }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function sellerRequestCancellationAction(formData: FormData) {
+  try {
+    const user = await requireSeller()
+    const leadId = String(formData.get('leadId'))
+    const reason = formData.get('reason') ? String(formData.get('reason')) : 'Keine Angabe'
+    await svcRequestCancellation(leadId, user.id, reason)
+    revalidatePath('/dashboard')
+    revalidatePath(`/leads/${leadId}`)
+    return {
+      ok: true,
+      toast: { title: 'Storno beantragt', description: 'Admin wurde benachrichtigt.', variant: 'success' as const },
+    }
+  } catch (err) {
+    return mapError(err)
+  }
+}
+
+export async function adminReviewCancellationAction(formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const requestId = String(formData.get('requestId'))
+    const decision = String(formData.get('decision')) // 'approve' | 'reject'
+    const refund = formData.get('refund') === 'on' || formData.get('refund') === 'true'
+    const notes = formData.get('notes') ? String(formData.get('notes')) : ''
+    if (decision !== 'approve' && decision !== 'reject') return { error: 'Ungültige Entscheidung.' }
+    await svcReviewCancellation(requestId, adminUser.id, decision === 'approve', refund, notes)
+    revalidatePath('/admin/tokens')
+    revalidatePath('/admin/leads')
+    revalidatePath('/admin/dashboard')
+    return {
+      ok: true,
+      toast: {
+        title: decision === 'approve' ? 'Storno genehmigt' : 'Storno abgelehnt',
+        variant: 'success' as const,
+      },
+    }
   } catch (err) {
     return mapError(err)
   }

@@ -1,7 +1,8 @@
 import { LoginForm } from './LoginForm'
-import { PhoneCall, Sparkles, ShieldCheck, Zap, Clock3 } from 'lucide-react'
+import { Sparkles, ShieldCheck, Zap, Clock3 } from 'lucide-react'
+import Image from 'next/image'
 
-export const metadata = { title: 'Anmelden · Energie CRM' }
+export const metadata = { title: 'Anmelden · Sparpartner CRM' }
 
 export default async function LoginPage() {
   return (
@@ -18,11 +19,16 @@ export default async function LoginPage() {
       <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-10 sm:px-6 lg:px-8">
         <header className="flex items-center justify-between">
           <div className="inline-flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-600 to-blue-700 text-white shadow-md shadow-blue-900/10">
-              <PhoneCall className="h-5 w-5 stroke-[2]" />
-            </div>
+            <Image
+              src="/sparpartner-logo.svg"
+              alt="Sparpartner24 Logo"
+              width={44}
+              height={44}
+              className="h-11 w-11 drop-shadow-sm"
+              priority
+            />
             <div className="leading-tight">
-              <div className="text-[15px] font-semibold tracking-tight">Energie CRM</div>
+              <div className="text-[15px] font-semibold tracking-tight">Sparpartner CRM</div>
               <div className="text-xs text-slate-500">Strom- &amp; Gasvertrieb</div>
             </div>
           </div>
@@ -91,7 +97,7 @@ export default async function LoginPage() {
                       Anmeldung
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      Gib deine Zugangsdaten ein oder nutze einen Demo-Account.
+                      Gib deine Zugangsdaten ein.
                     </p>
                   </div>
                   <LoginForm />
@@ -102,7 +108,7 @@ export default async function LoginPage() {
         </main>
 
         <footer className="mt-auto flex flex-col items-center justify-between gap-2 border-t border-slate-200/60 pt-5 text-[11px] text-slate-400 sm:flex-row">
-          <p>© {new Date().getFullYear()} Energie CRM · Interne Nutzung</p>
+          <p>© {new Date().getFullYear()} Sparpartner CRM · Interne Nutzung</p>
           <p className="text-slate-400/80">
             Fragen zum Zugriff? Wende dich an den Admin.
           </p>

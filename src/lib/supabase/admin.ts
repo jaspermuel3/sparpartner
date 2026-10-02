@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js'
+import { getSupabaseUrl, getSupabaseServiceRoleKey } from './_sanitize'
 
 export function createAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const url = getSupabaseUrl()
+  const key = getSupabaseServiceRoleKey()
 
   if (!url) {
     throw new Error('NEXT_PUBLIC_SUPABASE_URL ist nicht gesetzt.')

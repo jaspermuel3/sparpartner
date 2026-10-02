@@ -2,12 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import Image from 'next/image'
 import {
   LayoutDashboard,
   UserPlus,
   Users,
   CreditCard,
-  PhoneCall,
   PhoneForwarded,
   BarChart3,
   Settings,
@@ -17,6 +17,7 @@ import {
   Menu,
   PanelLeft,
   PanelLeftClose,
+  Globe2,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -47,6 +48,7 @@ const SALES_NAV: NavItem[] = [
 const ADMIN_NAV: NavItem[] = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/admin/leads', label: 'Leads', icon: Layers },
+  { href: '/admin/landing-leads', label: 'Landing Leads', icon: Globe2 },
   { href: '/admin/sellers', label: 'Benutzer', icon: Users },
   { href: '/admin/tokens', label: 'Tokens', icon: CreditCard },
   { href: '/admin/stats', label: 'Statistiken', icon: BarChart3 },
@@ -144,12 +146,16 @@ function DesktopNav({
           collapsed ? 'justify-center px-1' : 'gap-3 px-5',
         )}
       >
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sky-600 to-blue-700 text-white shadow-sm">
-          <PhoneCall className="h-5 w-5" />
-        </div>
+        <Image
+          src="/sparpartner-logo.svg"
+          alt="Sparpartner24 Logo"
+          width={36}
+          height={36}
+          className="h-9 w-9 shrink-0 drop-shadow-sm"
+        />
         {!collapsed && (
           <div className="leading-tight">
-            <div className="text-sm font-semibold tracking-tight">Energie CRM</div>
+            <div className="text-sm font-semibold tracking-tight">Sparpartner CRM</div>
             <div className="text-xs text-slate-500">{role === 'admin' ? 'Admin-Bereich' : 'Verkäufer'}</div>
           </div>
         )}
@@ -281,11 +287,15 @@ function MobileHeader({
             <SheetContent side="left" className="w-72 p-0">
               <div className="flex flex-col h-full">
                 <div className="flex h-16 items-center gap-3 border-b border-slate-200 px-5">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-sky-600 to-blue-700 text-white shadow-sm">
-                    <PhoneCall className="h-5 w-5" />
-                  </div>
+                  <Image
+                    src="/sparpartner-logo.svg"
+                    alt="Sparpartner24 Logo"
+                    width={36}
+                    height={36}
+                    className="h-9 w-9 shrink-0 drop-shadow-sm"
+                  />
                   <div className="leading-tight">
-                    <div className="text-sm font-semibold tracking-tight">Energie CRM</div>
+                    <div className="text-sm font-semibold tracking-tight">Sparpartner CRM</div>
                     <div className="text-xs text-slate-500">{role === 'admin' ? 'Admin' : 'Verkäufer'}</div>
                   </div>
                 </div>
@@ -312,7 +322,7 @@ function MobileHeader({
               </div>
             </SheetContent>
           </Sheet>
-          <div className="font-semibold tracking-tight lg:hidden">Energie CRM</div>
+          <div className="font-semibold tracking-tight lg:hidden">Sparpartner CRM</div>
         </div>
 
         <div className="flex items-center gap-3">

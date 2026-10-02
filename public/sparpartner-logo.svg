@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#84CC16;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#166534;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="greenTextGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#84CC16;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#16A34A;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="heartGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#65A30D;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#15803D;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="94" fill="none" stroke="url(#ringGrad)" stroke-width="5"/>
+  <text x="100" y="108" text-anchor="middle" font-family="Arial, sans-serif" font-weight="900" font-size="38">
+    <tspan fill="#1F2937">Spar</tspan><tspan fill="url(#greenTextGrad)">partner24</tspan>
+  </text>
+  <g transform="translate(158, 88) scale(0.62)" fill="url(#heartGrad)">
+    <path d="M23.5,5 C18,5 14,9.5 14,15 C14,21 20,26.5 23.5,31 C27,26.5 33,21 33,15 C33,9.5 29,5 23.5,5 Z" stroke="#15803D" stroke-width="1.2" fill="none"/>
+    <path d="M30 10 C32 13 32 17 29 21 C27 24 23 26.5 23 26.5 C23 26.5 25 22 28 17 C30 13 31 11 30 10 Z" fill="#15803D"/>
+  </g>
+</svg>

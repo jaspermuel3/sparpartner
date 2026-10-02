@@ -111,6 +111,67 @@ export default async function AdminStatsPage({
     ? scoredSellers.reduce((s, x) => s + x.score, 0) / scoredSellers.length
     : 0
 
+  // ========== #13 Heatmap Berechnung pro KPI ==========
+  const hmVals = {
+    score: scoredSellers.map((s) => s.score),
+    leads: scoredSellers.map((s) => Number(s.perf?.leads_total ?? 0)),
+    abschl: scoredSellers.map((s) => Number(s.perf?.abschlüsse ?? 0)),
+    verloren: scoredSellers.map((s) => Number(s.perf?.verloren ?? 0)),
+    quote: scoredSellers.map((s) => Number(s.perf?.abschluss_quote ?? 0)),
+    avgKontakte: scoredSellers.map((s) => Number(s.perf?.durchschnitt_kontakte ?? 0)),
+  }
+  const hmMax = (a: number[]) => (a.length ? Math.max(...a) : 0)
+  const hmMin = (a: number[]) => (a.length ? Math.min(...a) : 0)
+  const maxes = {
+    score: hmMax(hmVals.score) || 100,
+    leads: hmMax(hmVals.leads) || 1,
+    abschl: hmMax(hmVals.abschl) || 1,
+    verloren: hmMax(hmVals.verloren) || 1,
+    quote: hmMax(hmVals.quote) || 0.01,
+    avgKontakte: hmMax(hmVals.avgKontakte) || 1,
+  }
+
+  function hmPercentile(
+    value: number,
+    kpi: keyof typeof maxes,
+    inverse = false,
+  ): number {
+    const m = maxes[kpi]
+    if (!m || m <= 0) return 0.5
+    let r = Math.max(0, Math.min(1, value / m))
+    if (inverse) r = 1 - r
+    return r
+  }
+  function hmCellClass(ratio: number, border = true) {
+    // Top 25% grün -> unten 25% rot
+    if (ratio >= 0.75) return cn(border && 'border-emerald-200', 'bg-emerald-50 text-emerald-800')
+    if (ratio >= 0.5) return cn(border && 'border-amber-200', 'bg-amber-50 text-amber-800')
+    if (ratio >= 0.25) return cn(border && 'border-orange-200', 'bg-orange-50 text-orange-800')
+    return cn(border && 'border-red-200', 'bg-red-50 text-red-800')
+  }
+  function HeatCell({
+    ratio,
+    children,
+    align = 'right',
+  }: {
+    ratio: number
+    children: React.ReactNode
+    align?: 'left' | 'right' | 'center'
+  }) {
+    return (
+      <div
+        className={cn(
+          'inline-flex items-center justify-end rounded-md border px-2 py-0.5 font-semibold tabular-nums text-[13px]',
+          hmCellClass(ratio),
+          align === 'left' && 'justify-start',
+          align === 'center' && 'justify-center',
+        )}
+      >
+        {children}
+      </div>
+    )
+  }
+
   function rankBadge(rank: number): string {
     if (rank === 1) return 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white border-amber-500'
     if (rank === 2) return 'bg-gradient-to-br from-slate-300 to-slate-400 text-white border-slate-400'
@@ -212,6 +273,7 @@ export default async function AdminStatsPage({
       </Card>
 
       {/* ============ Seller-Ranking Scorecard (Top 3) ============ */}
+      <Suspense fallback={<SellerRankingSkeleton />}>
       {scoredSellers.length > 0 && (
         <Card className="border-slate-200 bg-gradient-to-br from-white via-slate-50 to-indigo-50/30 shadow-sm overflow-hidden">
           <CardContent className="p-4 sm:p-5">
@@ -335,30 +397,35 @@ export default async function AdminStatsPage({
           </CardContent>
         </Card>
       )}
+      </Suspense>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5">
-        <StatCard label="Leads" value={stats.leads} icon={<Users className="h-4 w-4" />} accent="default" />
-        <StatCard label="Kontaktversuche" value={stats.kontaktversuche} icon={<Phone className="h-4 w-4" />} accent="default" />
-        <StatCard label="Erreichte Kunden" value={stats.erreichte_kunden} icon={<PhoneCall className="h-4 w-4" />} accent="success" />
-        <StatCard label="Rückrufe offen" value={stats.rueckrufe} icon={<PhoneForwarded className="h-4 w-4" />} accent="warning" />
-        <StatCard label="Angebote" value={stats.angebote} icon={<FileSignature className="h-4 w-4" />} accent="default" />
-      </div>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Abschlüsse" value={stats.abschlüsse} icon={<CheckCircle2 className="h-4 w-4" />} accent="success" />
-        <StatCard label="Verlorene Leads" value={stats.verlorene_leads} icon={<XCircle className="h-4 w-4" />} accent="danger" />
-        <StatCard
-          label="Abschlussquote"
-          value={formatPercent(stats.abschluss_quote)}
-          icon={<Target className="h-4 w-4" />}
-          accent={stats.abschluss_quote >= 0.3 ? 'success' : stats.abschluss_quote >= 0.1 ? 'warning' : 'danger'}
-        />
-        <StatCard
-          label="Kontaktquote"
-          value={formatPercent(stats.kontakt_quote)}
-          icon={<Percent className="h-4 w-4" />}
-          accent={stats.kontakt_quote >= 0.7 ? 'success' : stats.kontakt_quote >= 0.4 ? 'warning' : 'danger'}
-        />
-      </div>
+      <Suspense fallback={<StatsGridSkeleton cols={5} />}>
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5">
+          <StatCard label="Leads" value={stats.leads} icon={<Users className="h-4 w-4" />} accent="default" />
+          <StatCard label="Kontaktversuche" value={stats.kontaktversuche} icon={<Phone className="h-4 w-4" />} accent="default" />
+          <StatCard label="Erreichte Kunden" value={stats.erreichte_kunden} icon={<PhoneCall className="h-4 w-4" />} accent="success" />
+          <StatCard label="Rückrufe offen" value={stats.rueckrufe} icon={<PhoneForwarded className="h-4 w-4" />} accent="warning" />
+          <StatCard label="Angebote" value={stats.angebote} icon={<FileSignature className="h-4 w-4" />} accent="default" />
+        </div>
+      </Suspense>
+      <Suspense fallback={<StatsGridSkeleton cols={4} />}>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Abschlüsse" value={stats.abschlüsse} icon={<CheckCircle2 className="h-4 w-4" />} accent="success" />
+          <StatCard label="Verlorene Leads" value={stats.verlorene_leads} icon={<XCircle className="h-4 w-4" />} accent="danger" />
+          <StatCard
+            label="Abschlussquote"
+            value={formatPercent(stats.abschluss_quote)}
+            icon={<Target className="h-4 w-4" />}
+            accent={stats.abschluss_quote >= 0.3 ? 'success' : stats.abschluss_quote >= 0.1 ? 'warning' : 'danger'}
+          />
+          <StatCard
+            label="Kontaktquote"
+            value={formatPercent(stats.kontakt_quote)}
+            icon={<Percent className="h-4 w-4" />}
+            accent={stats.kontakt_quote >= 0.7 ? 'success' : stats.kontakt_quote >= 0.4 ? 'warning' : 'danger'}
+          />
+        </div>
+      </Suspense>
 
       {/* #95 Lead-Funnel */}
       <Card className="border-slate-200 bg-white shadow-sm">
@@ -429,77 +496,82 @@ export default async function AdminStatsPage({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  scoredSellers.map(({ seller, perf: p, score, rank, team }) => (
-                    <TableRow key={seller.id} className="hover:bg-slate-50">
-                      <TableCell>
-                        <div className={cn(
-                          'inline-flex items-center justify-center h-7 w-7 rounded-md border text-[10px] font-bold shadow-sm',
-                          rankBadge(rank),
-                        )}>
-                          {rank <= 3 ? rankIcon(rank) : rank}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-[10px] font-semibold text-white">
-                            {(seller.full_name ?? seller.email ?? '?').slice(0, 1).toUpperCase()}
+                  scoredSellers.map(({ seller, perf: p, score, rank, team }) => {
+                    const pLeads = Number(p?.leads_total ?? 0)
+                    const pAbschl = Number(p?.abschlüsse ?? 0)
+                    const pVerloren = Number(p?.verloren ?? 0)
+                    const pQuote = Number(p?.abschluss_quote ?? 0)
+                    const pKontakte = Number(p?.durchschnitt_kontakte ?? 0)
+                    return (
+                      <TableRow key={seller.id} className="hover:bg-slate-50/70">
+                        <TableCell>
+                          <div className={cn(
+                            'inline-flex items-center justify-center h-7 w-7 rounded-md border text-[10px] font-bold shadow-sm',
+                            rankBadge(rank),
+                          )}>
+                            {rank <= 3 ? rankIcon(rank) : rank}
                           </div>
-                          <div>
-                            <div className="text-sm font-medium text-slate-900">{seller.full_name ?? 'Kein Name'}</div>
-                            <div className="text-[11px] text-slate-500">{seller.email}</div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-[10px] font-semibold text-white">
+                              {(seller.full_name ?? seller.email ?? '?').slice(0, 1).toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="text-sm font-medium text-slate-900">{seller.full_name ?? 'Kein Name'}</div>
+                              <div className="text-[11px] text-slate-500">{seller.email}</div>
+                            </div>
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        {team ? (
-                          <div className="inline-flex items-center gap-1.5 text-[11px] text-slate-700 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">
-                            <span
-                              className="h-1.5 w-1.5 rounded-full"
-                              style={{ backgroundColor: team.color }}
-                            />
-                            {team.name}
-                          </div>
-                        ) : (
-                          <span className="text-[11px] text-slate-400 italic">— kein Team —</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        <span className={cn(
-                          'text-sm font-bold',
-                          score >= 60
-                            ? 'text-emerald-700'
-                            : score >= 35
-                              ? 'text-amber-700'
-                              : 'text-slate-500',
-                        )}>
-                          {score.toFixed(1)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-sm">{p.leads_total}</TableCell>
-                      <TableCell className="text-right">
-                        <span className="inline-flex items-center gap-1 text-sm font-medium text-emerald-700">
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          {p.abschlüsse}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-sm text-red-700">{p.verloren}</TableCell>
-                      <TableCell className="text-right hidden md:table-cell">
-                        <span className={
-                          'text-sm font-medium ' +
-                          (p.abschluss_quote >= 0.3
-                            ? 'text-emerald-700'
-                            : p.abschluss_quote >= 0.1
-                              ? 'text-amber-700'
-                              : 'text-slate-500')
-                        }>
-                          {formatPercent(p.abschluss_quote)}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right hidden lg:table-cell text-sm text-slate-700 tabular-nums">
-                        {p.durchschnitt_kontakte.toFixed(1).replace('.', ',')}
-                      </TableCell>
-                    </TableRow>
-                  ))
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {team ? (
+                            <div className="inline-flex items-center gap-1.5 text-[11px] text-slate-700 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5">
+                              <span
+                                className="h-1.5 w-1.5 rounded-full"
+                                style={{ backgroundColor: team.color }}
+                              />
+                              {team.name}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 italic">— kein Team —</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <HeatCell ratio={hmPercentile(score, 'score')}>
+                            {score.toFixed(1)}
+                          </HeatCell>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <HeatCell ratio={hmPercentile(pLeads, 'leads')}>
+                            {pLeads}
+                          </HeatCell>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <HeatCell ratio={hmPercentile(pAbschl, 'abschl')}>
+                            <span className="inline-flex items-center gap-1">
+                              <CheckCircle2 className="h-3 w-3 opacity-70" />
+                              {pAbschl}
+                            </span>
+                          </HeatCell>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <HeatCell ratio={hmPercentile(pVerloren, 'verloren', true)}>
+                            {pVerloren}
+                          </HeatCell>
+                        </TableCell>
+                        <TableCell className="text-right hidden md:table-cell">
+                          <HeatCell ratio={hmPercentile(pQuote, 'quote')}>
+                            {formatPercent(pQuote)}
+                          </HeatCell>
+                        </TableCell>
+                        <TableCell className="text-right hidden lg:table-cell">
+                          <HeatCell ratio={hmPercentile(pKontakte, 'avgKontakte', true)}>
+                            {pKontakte.toFixed(1).replace('.', ',')}
+                          </HeatCell>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
                 )}
               </TableBody>
             </Table>
@@ -507,5 +579,68 @@ export default async function AdminStatsPage({
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+function StatsGridSkeleton({ cols }: { cols: number }) {
+  const gridClass =
+    cols === 5
+      ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-5'
+      : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4'
+  return (
+    <div className={`grid gap-4 ${gridClass}`}>
+      {Array.from({ length: cols }).map((_, i) => (
+        <div key={i} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <Skeleton className="mb-2 h-3 w-24" />
+          <Skeleton className="mb-1 h-7 w-28" />
+          <Skeleton className="h-3 w-40" />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SellerRankingSkeleton() {
+  return (
+    <Card className="border-slate-200 bg-gradient-to-br from-white via-slate-50 to-indigo-50/30 shadow-sm overflow-hidden">
+      <CardContent className="p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <Skeleton className="mb-2 h-3 w-28" />
+            <Skeleton className="mb-1 h-5 w-64" />
+            <Skeleton className="h-3 w-72 hidden sm:block" />
+          </div>
+          <div className="text-right hidden sm:block space-y-1">
+            <Skeleton className="h-3 w-24 ml-auto" />
+            <Skeleton className="h-3 w-28 ml-auto" />
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="relative rounded-2xl border border-slate-200 p-4 bg-white">
+              <div className="flex items-start justify-between mb-3">
+                <Skeleton className="h-8 w-8 rounded-lg border" />
+                <div className="space-y-1 text-right">
+                  <Skeleton className="h-6 w-16" />
+                  <Skeleton className="h-2.5 w-14 ml-auto" />
+                </div>
+              </div>
+              <div className="flex items-center gap-3 mb-3">
+                <Skeleton className="h-10 w-10 rounded-full" />
+                <div className="space-y-1.5 min-w-0 flex-1">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-20" />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center border-t border-slate-100 pt-3">
+                <Skeleton className="h-7 w-full rounded" />
+                <Skeleton className="h-7 w-full rounded" />
+                <Skeleton className="h-7 w-full rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   )
 }

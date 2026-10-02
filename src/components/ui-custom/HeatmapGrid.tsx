@@ -14,23 +14,6 @@ interface HeatmapGridProps {
   userId?: string
 }
 
-function generateDemoData(): TimeHeatmapCell[] {
-  const cells: TimeHeatmapCell[] = []
-  for (let day = 0; day < 7; day++) {
-    for (let hour = START_HOUR; hour < END_HOUR; hour++) {
-      const attempts = Math.floor(Math.random() * 16)
-      const reached = attempts > 0 ? Math.floor(Math.random() * (attempts + 1)) : 0
-      cells.push({
-        day_of_week: day,
-        hour_of_day: hour,
-        attempts,
-        reached,
-      })
-    }
-  }
-  return cells
-}
-
 function getCellColor(rate: number): string {
   if (rate <= 0) return 'bg-slate-100'
   if (rate < 0.125) return 'bg-emerald-50'
@@ -48,12 +31,7 @@ function formatHour(h: number): string {
 }
 
 export function HeatmapGrid({ data, userId: _userId }: HeatmapGridProps) {
-  const cells = useMemo<TimeHeatmapCell[]>(() => {
-    if (data && data.length > 0) {
-      return data
-    }
-    return generateDemoData()
-  }, [data])
+  const cells = useMemo<TimeHeatmapCell[]>(() => data ?? [], [data])
 
   const cellMap = useMemo(() => {
     const map = new Map<string, TimeHeatmapCell>()

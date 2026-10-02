@@ -82,6 +82,8 @@ import {
   formatBytes,
   phoneHref,
   formatDaysSince,
+  formatCallDuration,
+  formatCallDurationLong,
 } from '@/lib/constants'
 import type { LeadStatus, Tag, LeadDocument, ContactAttempt, LeadStatusHistory, Callback } from '@/types'
 import { cn } from '@/lib/utils'
@@ -220,7 +222,7 @@ function ActionButton({
   return inner
 }
 
-/* ============ Call-Quick-Overlay (Punkt 26) ============ */
+/* ============ Call-Quick-Overlay (Punkt 26) + Live Timer (Punkt 35) ============ */
 function CallQuickOverlay({
   open,
   onClose,
@@ -234,6 +236,30 @@ function CallQuickOverlay({
   name: string
   phone: string | null
 }) {
+  const [callStartedAt, setCallStartedAt] = useState<number | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+
+  useEffect(() => {
+    if (!open) return
+    setCallStartedAt(null)
+    setElapsed(0)
+  }, [open])
+
+  useEffect(() => {
+    if (callStartedAt === null) return
+    const id = window.setInterval(() => {
+      setElapsed(Math.floor((Date.now() - callStartedAt) / 1000))
+    }, 250)
+    return () => window.clearInterval(id)
+  }, [callStartedAt])
+
+  function startCallTimer() {
+    if (callStartedAt === null) setCallStartedAt(Date.now())
+  }
+
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
+  const ss = String(elapsed % 60).padStart(2, '0')
+
   return (
     <div
       aria-hidden={!open}
@@ -247,12 +273,28 @@ function CallQuickOverlay({
       <div className="rounded-2xl border border-slate-200 bg-white shadow-[0_18px_60px_-20px_rgba(15,23,42,0.35)] p-3 animate-in fade-in zoom-in-95">
         <div className="flex items-center justify-between gap-2 mb-2.5 px-1">
           <div className="flex items-center gap-2 min-w-0">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 shrink-0">
+            <div className={cn(
+              'relative flex h-8 w-8 items-center justify-center rounded-full border shrink-0 transition-colors',
+              callStartedAt !== null
+                ? 'bg-emerald-500 text-white border-emerald-600 animate-pulse'
+                : 'bg-emerald-100 text-emerald-700 border-emerald-200',
+            )}>
               <PhoneCall className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-slate-900 truncate">{name || 'Lead'}</div>
-              <div className="text-[11px] text-slate-500">{phone ?? 'Keine Telefonnummer'}</div>
+              <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                {phone ?? 'Keine Telefonnummer'}
+                {callStartedAt !== null && (
+                  <>
+                    <span className="text-slate-300">·</span>
+                    <span className="tabular-nums font-medium text-emerald-600 flex items-center gap-1">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 pulse-dot" />
+                      {mm}:{ss}
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
           <button
@@ -265,20 +307,55 @@ function CallQuickOverlay({
           </button>
         </div>
         <div className="grid grid-cols-4 gap-1.5">
-          <QuickResultBtn leadId={leadId} result="erreicht" label="Erreicht" icon={<CheckCircle2 className="h-4 w-4" />} tone="emerald" onSuccess={onClose} />
-          <QuickResultBtn leadId={leadId} result="besetzt" label="Besetzt" icon={<PhoneOff className="h-4 w-4" />} tone="amber" onSuccess={onClose} />
-          <QuickResultBtn leadId={leadId} result="rückruf" label="Rückruf" icon={<PhoneForwarded className="h-4 w-4" />} tone="blue" onSuccess={onClose} />
-          <QuickResultBtn leadId={leadId} result="kein_interesse" label="Kein Interesse" icon={<ThumbsDown className="h-4 w-4" />} tone="rose" onSuccess={onClose} />
+          <QuickResultBtn
+            leadId={leadId}
+            result="erreicht"
+            label="Erreicht"
+            icon={<CheckCircle2 className="h-4 w-4" />}
+            tone="emerald"
+            onSuccess={onClose}
+            callSeconds={elapsed > 0 ? elapsed : undefined}
+          />
+          <QuickResultBtn
+            leadId={leadId}
+            result="besetzt"
+            label="Besetzt"
+            icon={<PhoneOff className="h-4 w-4" />}
+            tone="amber"
+            onSuccess={onClose}
+            callSeconds={elapsed > 0 ? elapsed : undefined}
+          />
+          <QuickResultBtn
+            leadId={leadId}
+            result="rückruf"
+            label="Rückruf"
+            icon={<PhoneForwarded className="h-4 w-4" />}
+            tone="blue"
+            onSuccess={onClose}
+            callSeconds={elapsed > 0 ? elapsed : undefined}
+          />
+          <QuickResultBtn
+            leadId={leadId}
+            result="kein_interesse"
+            label="Kein Interesse"
+            icon={<ThumbsDown className="h-4 w-4" />}
+            tone="rose"
+            onSuccess={onClose}
+            callSeconds={elapsed > 0 ? elapsed : undefined}
+          />
         </div>
         {phone ? (
           <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-2 px-1">
-            <div className="text-[11px] text-slate-500">Nummer direkt anrufen</div>
+            <div className="text-[11px] text-slate-500">
+              {callStartedAt === null ? 'Nummer direkt anrufen (Timer startet automatisch)' : 'Anruf läuft – Ergebnis oben wählen'}
+            </div>
             <a
               href={phoneHref(phone)}
+              onClick={startCallTimer}
               className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-[11px] font-semibold text-white hover:bg-emerald-700 transition shadow-sm"
             >
               <PhoneCall className="h-3.5 w-3.5" />
-              Anrufen
+              {callStartedAt === null ? 'Anrufen' : 'Weiter telefonieren'}
             </a>
           </div>
         ) : null}
@@ -294,6 +371,7 @@ function QuickResultBtn({
   icon,
   tone,
   onSuccess,
+  callSeconds,
 }: {
   leadId: string
   result: 'erreicht' | 'besetzt' | 'rückruf' | 'kein_interesse'
@@ -301,8 +379,17 @@ function QuickResultBtn({
   icon: React.ReactNode
   tone: 'emerald' | 'amber' | 'blue' | 'rose'
   onSuccess: () => void
+  callSeconds?: number
 }) {
   const [state, formAction] = useFormState<ActionResult | null, FormData>(async (_, fd) => {
+    if (callSeconds && callSeconds > 0) {
+      const mm = String(Math.floor(callSeconds / 60)).padStart(2, '0')
+      const ss = String(callSeconds % 60).padStart(2, '0')
+      const existingNotes = String(fd.get('notes') ?? '')
+      const autoNote = `[Anruf: ${mm}:${ss} Dauer per Quick-Overlay]`
+      fd.set('notes', existingNotes ? `${autoNote}\n${existingNotes}` : autoNote)
+      fd.set('call_duration_seconds', String(callSeconds))
+    }
     const res = (await addContactAttemptAction(fd)) as any
     if (res?.ok) onSuccess()
     return res
@@ -330,6 +417,11 @@ function QuickResultBtn({
       >
         <span className="flex h-5 w-5 items-center justify-center">{icon}</span>
         <span className="text-[10px] font-semibold leading-tight">{label}</span>
+        {callSeconds && callSeconds > 0 ? (
+          <span className="text-[9px] tabular-nums opacity-80 leading-tight">
+            {String(Math.floor(callSeconds / 60)).padStart(2, '0')}:{String(callSeconds % 60).padStart(2, '0')}
+          </span>
+        ) : null}
       </SubmitButton>
     </form>
   )
@@ -839,54 +931,59 @@ function UploadDocumentForm({ leadId }: { leadId: string }) {
   const [size, setSize] = useState(0)
 
   return (
-    <form action={formAction} className="space-y-3">
-      <input type="hidden" name="leadId" value={leadId} />
-      <input type="hidden" name="file_name" value={fileName} />
-      <input type="hidden" name="size" value={String(size)} />
-      <div>
-        <Label
-          htmlFor={`doc-upload-${leadId}`}
-          className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-xs text-slate-500 hover:bg-slate-100 hover:border-slate-300 transition-colors"
-        >
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-slate-500 border border-slate-200">
-            <Upload className="h-4 w-4" />
-          </div>
-          <div className="text-center">
-            <div className="font-medium text-slate-700">
-              {fileName ? fileName : 'Datei wählen oder hierher ziehen'}
+    <div className="space-y-3">
+      <form action={formAction} className="space-y-3">
+        <input type="hidden" name="leadId" value={leadId} />
+        <input type="hidden" name="file_name" value={fileName} />
+        <input type="hidden" name="size" value={String(size)} />
+        <div>
+          <Label
+            htmlFor={`doc-upload-${leadId}`}
+            className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-xs text-slate-500 hover:bg-slate-100 hover:border-slate-300 transition-colors"
+          >
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-slate-500 border border-slate-200">
+              <Upload className="h-4 w-4" />
             </div>
-            <div className="mt-0.5 text-[11px] text-slate-400">
-              Demo: Speichert nur Metadaten in der DB (Storage-Integration nach Migration)
+            <div className="text-center">
+              <div className="font-medium text-slate-700">
+                {fileName ? fileName : 'Datei wählen oder hierher ziehen'}
+              </div>
+              <div className="mt-0.5 text-[11px] text-slate-400">
+                PDF, Bilder (PNG, JPG) · bis 10 MB
+              </div>
             </div>
-          </div>
-        </Label>
-        <input
-          id={`doc-upload-${leadId}`}
-          name="file"
-          type="file"
-          className="sr-only"
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) {
-              setFileName(f.name)
-              setSize(f.size)
-            }
-          }}
-        />
-      </div>
-      {state?.error ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{state.error}</div>
-      ) : null}
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] text-slate-500 tabular-nums">
-          {size > 0 ? `Datei: ${formatBytes(size)}` : 'Keine Datei gewählt'}
+          </Label>
+          <input
+            id={`doc-upload-${leadId}`}
+            name="file"
+            type="file"
+            accept="image/*,.pdf"
+            className="sr-only"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) {
+                setFileName(f.name)
+                setSize(f.size)
+              }
+            }}
+          />
         </div>
-        <SubmitButton size="sm" className="h-9 px-4 text-xs" disabled={!fileName}>
-          <FileText className="h-3.5 w-3.5" />
-          Hinzufügen
-        </SubmitButton>
-      </div>
-    </form>
+        {state?.error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{state.error}</div>
+        ) : null}
+        <div className="flex items-center justify-between">
+          <div className="text-[11px] text-slate-500 tabular-nums">
+            {size > 0 ? `Datei: ${formatBytes(size)}` : 'Keine Datei gewählt'}
+          </div>
+          <div className="flex items-center gap-2">
+            <SubmitButton size="sm" className="h-9 px-4 text-xs" disabled={!fileName}>
+              <FileText className="h-3.5 w-3.5" />
+              Hinzufügen
+            </SubmitButton>
+          </div>
+        </div>
+      </form>
+    </div>
   )
 }
 
@@ -973,18 +1070,45 @@ export function TimelineWithFilter({
 }
 
 function AttemptNode({ a }: { a: AttemptLike }) {
+  const duration = a.call_duration_seconds ?? null
+  const durShort = formatCallDuration(duration)
+  const durLong = formatCallDurationLong(duration)
   return (
     <div className="flex items-start gap-3 w-full">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-blue-50 text-blue-600">
+      <div
+        className={cn(
+          'flex h-8 w-8 shrink-0 items-center justify-center rounded-full border',
+          duration !== null
+            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+            : 'border-blue-200 bg-blue-50 text-blue-600',
+        )}
+      >
         <Phone className="h-3.5 w-3.5" />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="font-medium text-slate-900">Kontaktversuch</span>
           <ContactResultPill result={a.result} />
+          {durShort ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 tabular-nums"
+              title={durLong ?? undefined}
+            >
+              <Clock className="h-3 w-3" />
+              {durShort}
+            </span>
+          ) : null}
+          <span className="text-[11px] text-slate-500 tabular-nums ml-auto">
+            {formatDate(a.attempt_date)} · {formatTime(a.attempt_date)}
+          </span>
         </div>
-        {a.notes && <div className="mt-1 text-sm text-slate-600">{a.notes}</div>}
-        <div className="mt-0.5 text-[11px] text-slate-500 tabular-nums">{formatDate(a.attempt_date)}</div>
+        {durLong && (
+          <div className="text-[10px] text-emerald-700 mt-0.5 flex items-center gap-1.5">
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            Gesprächszeit: <span className="font-semibold">{durLong}</span>
+          </div>
+        )}
+        {a.notes && <div className="mt-1 text-sm text-slate-600 whitespace-pre-wrap">{a.notes}</div>}
       </div>
     </div>
   )
@@ -1130,6 +1254,7 @@ export function LeadScorecard({
   leadAgeClass,
   openCallbackOverdue,
   nextCallbackAt,
+  totalTalkTimeSeconds,
 }: {
   lastContactAt: string | null
   attemptsCount: number
@@ -1138,10 +1263,13 @@ export function LeadScorecard({
   leadAgeClass: string
   openCallbackOverdue: boolean
   nextCallbackAt: string | null
+  totalTalkTimeSeconds: number | null
 }) {
   const lastDays = lastContactAt ? formatDaysSince(lastContactAt) : null
   const lastText = lastDays === null ? '—' : lastDays === 0 ? 'Heute' : `vor ${lastDays} T.`
   const ageText = leadAge === null ? '—' : leadAge === 0 ? 'Heute' : `${leadAge} T.`
+  const talkShort = formatCallDuration(totalTalkTimeSeconds)
+  const talkLong = formatCallDurationLong(totalTalkTimeSeconds)
 
   // Fortschrittsbalken: "Bearbeitungsfortschritt" (0-100%)
   // Heuristik: Anzahl Versuche / offene Rückrufe / Alter
@@ -1251,18 +1379,27 @@ export function LeadScorecard({
             : 'bg-red-500'
           : 'bg-slate-200',
     },
+    {
+      label: '∑ Gesprächszeit',
+      value: talkShort ?? '00:00',
+      hint: talkLong ? talkLong : 'Noch keine Gespräche dokumentiert',
+      color: talkShort ? 'text-emerald-700' : '',
+      icon: <Clock className="h-3.5 w-3.5" />,
+      progress: Math.min(100, (totalTalkTimeSeconds ?? 0) / 18),
+      progressColor: talkShort ? 'bg-emerald-500' : 'bg-slate-200',
+    },
   ]
 
   return (
     <div
       className={cn(
-        'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 rounded-2xl border bg-white p-3 shadow-sm sm:gap-3 sm:p-4 mt-2 w-full animate-in fade-in slide-in-from-top-2 ring-1 ring-transparent transition-all duration-300',
+        'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 rounded-2xl border bg-white p-3 shadow-sm sm:gap-3 sm:p-4 mt-2 w-full animate-in fade-in slide-in-from-top-2 ring-1 ring-transparent transition-all duration-300',
         urgencyTone,
         openCallbackOverdue && 'urgent-pulse',
       )}
     >
       {/* Aktivitäts-Score (ganz oben, volle Breite) */}
-      <div className="col-span-1 sm:col-span-2 lg:col-span-4 flex items-center gap-2 -mb-1">
+      <div className="col-span-1 sm:col-span-2 lg:col-span-5 flex items-center gap-2 -mb-1">
         <div className="text-[10px] font-medium uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
           <Sparkles className="h-3 w-3" />
           Aktivitäts-Score
@@ -1351,23 +1488,65 @@ export function NextStepPanel({
   const overdue = nextCb ? new Date(nextCb.callback_at).getTime() < Date.now() - 60_000 : false
   const lastDays = lastContactAt ? formatDaysSince(lastContactAt) : null
 
-  // Priorisierte Tasks
-  const tasks: { title: string; sub?: string; tone: 'critical' | 'action' | 'info' | 'ok' }[] = []
+  type Task = {
+    title: string
+    sub?: string
+    tone: 'critical' | 'action' | 'info' | 'ok'
+    reason?: string
+  }
+  const tasks: Task[] = []
   if (nextCb) {
     tasks.push({
       title: overdue ? 'Rückruf überfällig' : 'Rückruf durchführen',
       sub: `${formatDateShort(nextCb.callback_at)} · ${formatTime(nextCb.callback_at)}${nextCb.notes ? ' — ' + nextCb.notes : ''}`,
       tone: overdue ? 'critical' : 'action',
+      reason: overdue
+        ? 'Geplanter Rückruf liegt in der Vergangenheit → höchste Priorität'
+        : 'Rückruf ist der nächste dokumentierte Termin in der Historie',
     })
   } else if (attemptsCount === 0) {
-    tasks.push({ title: 'Erstkontakt aufnehmen', sub: 'Noch kein Kontaktversuch dokumentiert', tone: 'action' })
+    tasks.push({
+      title: 'Erstkontakt aufnehmen',
+      sub: 'Noch kein Kontaktversuch dokumentiert',
+      tone: 'action',
+      reason: 'Lead ist noch unberührt; Quote sinkt mit jedem unberührten Tag um ~10%',
+    })
   } else if (lastDays !== null && lastDays > 7) {
-    tasks.push({ title: 'Wiedervorlage einplanen', sub: `Letzter Kontakt vor ${lastDays} Tagen`, tone: 'action' })
+    tasks.push({
+      title: 'Wiedervorlage einplanen',
+      sub: `Letzter Kontakt vor ${lastDays} Tagen`,
+      tone: 'action',
+      reason: `Nach ${lastDays} Tagen ohne Kontakt sinkt die Abschlusswahrscheinlichkeit deutlich`,
+    })
   } else {
-    tasks.push({ title: 'Aktuell kein dringender Schritt', sub: 'Bearbeitung nach Bedarf fortsetzen', tone: 'ok' })
+    tasks.push({
+      title: 'Aktuell kein dringender Schritt',
+      sub: 'Bearbeitung nach Bedarf fortsetzen',
+      tone: 'ok',
+      reason: 'Alle offenen Aufgaben sind erledigt oder liegen außerhalb der Frist',
+    })
   }
-  if (status === 'new') tasks.push({ title: 'Status auf Zugewiesen setzen', sub: 'Lead offiziell in Bearbeitung nehmen', tone: 'info' })
-  if (status === 'contacted' && !nextCb) tasks.push({ title: 'Rückruf oder nächsten Schritt planen', tone: 'info' })
+  if (status === 'new')
+    tasks.push({
+      title: 'Status auf Zugewiesen setzen',
+      sub: 'Lead offiziell in Bearbeitung nehmen',
+      tone: 'info',
+      reason: 'Status wird für die korrekte Berechnung des Pipelines-Fortschritts benötigt',
+    })
+  if (status === 'contacted' && !nextCb)
+    tasks.push({
+      title: 'Rückruf oder nächsten Schritt planen',
+      tone: 'info',
+      reason: 'Ohne festen nächsten Termin droht der Lead in der Warteschleife zu verschwinden',
+    })
+  if (leadAge !== null && leadAge > 14 && status !== 'closed' && status !== 'canceled' && status !== 'no_interest') {
+    tasks.push({
+      title: 'Finalen Abschluss prüfen',
+      sub: `Lead-Alter: ${leadAge} Tage`,
+      tone: 'info',
+      reason: 'Leads älter als 14 Tage haben eine deutlich reduzierte Conversion-Chance',
+    })
+  }
 
   const toneClasses = {
     critical: 'border-red-200 bg-red-50 text-red-700',
@@ -1386,8 +1565,12 @@ export function NextStepPanel({
     <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden animate-in fade-in slide-in-from-right-2">
       <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <ZapIconInline className="h-4 w-4 text-slate-600" />
+          <ZapIconInline className="h-4 w-4 text-indigo-600" />
           <h3 className="text-sm font-semibold text-slate-800 tracking-tight">Nächster Schritt</h3>
+          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 border border-indigo-100 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-600">
+            <Sparkles className="h-2.5 w-2.5" />
+            KI-Vorschlag
+          </span>
         </div>
         {overdue && (
           <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 pulse-dot">
@@ -1401,7 +1584,7 @@ export function NextStepPanel({
           <div
             key={i}
             className={cn(
-              'flex items-start gap-2.5 rounded-lg border px-3 py-2.5',
+              'flex items-start gap-2.5 rounded-lg border px-3 py-2.5 group transition-colors',
               toneClasses[t.tone],
               overdue && t.tone === 'critical' && 'urgent-pulse',
             )}
@@ -1410,6 +1593,12 @@ export function NextStepPanel({
             <div className="min-w-0 flex-1">
               <div className="text-xs font-semibold leading-tight">{t.title}</div>
               {t.sub && <div className="mt-0.5 text-[11px] opacity-90 leading-tight truncate">{t.sub}</div>}
+              {t.reason && (
+                <div className="mt-1 text-[10px] opacity-0 group-hover:opacity-80 leading-tight transition-opacity flex items-start gap-1">
+                  <Sparkles className="h-2.5 w-2.5 shrink-0 mt-0.5" />
+                  <span className="italic">{t.reason}</span>
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -1463,44 +1652,58 @@ export function MiniTimelineSidebar({
             Noch keine Aktivitäten
           </div>
         ) : (
-          shown.map((e, i) => (
-            <div
-              key={i}
-              className="flex items-start gap-2.5 rounded-lg border border-slate-100 bg-slate-50/50 px-2.5 py-2"
-            >
+          shown.map((e, i) => {
+            const attemptDur = e.kind === 'attempt' ? formatCallDuration(e.data.call_duration_seconds) : null
+            return (
               <div
-                className={cn(
-                  'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px]',
-                  e.kind === 'attempt' && 'border-blue-200 bg-blue-50 text-blue-600',
-                  e.kind === 'status' && 'border-purple-200 bg-purple-50 text-purple-600',
-                  e.kind === 'callback' && 'border-amber-200 bg-amber-50 text-amber-600',
-                )}
+                key={i}
+                className="flex items-start gap-2.5 rounded-lg border border-slate-100 bg-slate-50/50 px-2.5 py-2"
               >
-                {e.kind === 'attempt' && <Phone className="h-3 w-3" />}
-                {e.kind === 'status' && <Layers className="h-3 w-3" />}
-                {e.kind === 'callback' && <CalendarDays className="h-3 w-3" />}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="text-[11px] font-medium text-slate-800 truncate leading-tight">
-                  {e.kind === 'attempt' && 'Kontaktversuch · ' + (CONTACT_RESULT_LABELS[e.data.result as keyof typeof CONTACT_RESULT_LABELS] ?? e.data.result)}
-                  {e.kind === 'status' &&
-                    'Status: ' +
-                      (e.data.old_status ? LEAD_STATUS_LABELS[e.data.old_status as LeadStatus] + ' → ' : '') +
-                      LEAD_STATUS_LABELS[e.data.new_status as LeadStatus]}
-                  {e.kind === 'callback' &&
-                    'Rückruf ' +
-                      (e.data.status === 'offen'
-                        ? 'geplant'
-                        : e.data.status === 'erledigt'
-                        ? 'erledigt'
-                        : 'storniert')}
+                <div
+                  className={cn(
+                    'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px]',
+                    e.kind === 'attempt'
+                      ? attemptDur
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-blue-200 bg-blue-50 text-blue-600'
+                      : e.kind === 'status'
+                        ? 'border-purple-200 bg-purple-50 text-purple-600'
+                        : 'border-amber-200 bg-amber-50 text-amber-600',
+                  )}
+                >
+                  {e.kind === 'attempt' && <Phone className="h-3 w-3" />}
+                  {e.kind === 'status' && <Layers className="h-3 w-3" />}
+                  {e.kind === 'callback' && <CalendarDays className="h-3 w-3" />}
                 </div>
-                <div className="text-[10px] text-slate-500 tabular-nums leading-tight mt-0.5">
-                  {formatDateShort(e.at)} · {formatTime(e.at)}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="text-[11px] font-medium text-slate-800 truncate leading-tight">
+                      {e.kind === 'attempt' && 'Kontaktversuch · ' + (CONTACT_RESULT_LABELS[e.data.result as keyof typeof CONTACT_RESULT_LABELS] ?? e.data.result)}
+                      {e.kind === 'status' &&
+                        'Status: ' +
+                          (e.data.old_status ? LEAD_STATUS_LABELS[e.data.old_status as LeadStatus] + ' → ' : '') +
+                          LEAD_STATUS_LABELS[e.data.new_status as LeadStatus]}
+                      {e.kind === 'callback' &&
+                        'Rückruf ' +
+                          (e.data.status === 'offen'
+                            ? 'geplant'
+                            : e.data.status === 'erledigt'
+                            ? 'erledigt'
+                            : 'storniert')}
+                    </div>
+                    {attemptDur && (
+                      <span className="inline-flex items-center rounded bg-emerald-50 border border-emerald-200 px-1 py-0.5 text-[9px] font-semibold text-emerald-700 tabular-nums">
+                        ⏱ {attemptDur}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-500 tabular-nums leading-tight mt-0.5">
+                    {formatDateShort(e.at)} · {formatTime(e.at)}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            )
+          })
         )}
         {all.length > defaultLimit && (
           <button

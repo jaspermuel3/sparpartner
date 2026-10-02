@@ -16,9 +16,9 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { SOURCE_LABELS, formatCurrency, formatDateShort, formatPercent } from '@/lib/constants'
-import { Target, DollarSign, Users, Sparkles, Pencil } from 'lucide-react'
+import { Target, DollarSign, Users, Sparkles, Pencil, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { CampaignDialogs } from './CampaignDialogs'
+import { CreateCampaignDialog, EditCampaignDialog } from './CampaignDialogs'
 
 export const metadata = { title: 'Kampagnen · Admin' }
 
@@ -39,7 +39,7 @@ export default async function AdminCampaignsPage() {
         ]}
         title="Kampagnen verwalten"
         description="Quellen, Budgets, Zeiträume & Performance pro Kampagne im Überblick."
-        actions={<CampaignDialogs.Create campaigns={campaigns} />}
+        actions={<CreateCampaignDialog campaigns={campaigns} />}
       />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -123,11 +123,50 @@ function CampaignRow({ campaign }: { campaign: any }) {
           ? `${Math.round(stats.avgGas)} Gas`
           : '-'
 
+  const budget = Number(campaign.budget_amount ?? 0) || 0
+  const assignedCount = stats.assigned ?? 0
+  const usedBudget = assignedCount * 1
+  const total = stats.total ?? 0
+  const closed = stats.closed ?? 0
+  const budgetPct = budget > 0 ? Math.min(1, usedBudget / budget) : 0
+  const quote = stats.quote ?? 0
+
+  const COST_PER_ABSCHLUSS_TARGET = 50
+  let roiStatus: 'good' | 'warn' | 'bad' | 'none' = 'none'
+  let roiText = '-'
+  let RoiIcon: any = null
+  if (budget > 0 && closed > 0) {
+    const cpa = budget / closed
+    const ratio = COST_PER_ABSCHLUSS_TARGET / Math.max(1, cpa)
+    if (ratio >= 1.3) { roiStatus = 'good'; roiText = `ROI +${Math.round((ratio - 1) * 100)}%`; RoiIcon = TrendingUp }
+    else if (ratio >= 0.7) { roiStatus = 'warn'; roiText = `Ø ${cpa.toFixed(0)}€`; RoiIcon = Minus }
+    else { roiStatus = 'bad'; roiText = `ROI ${Math.round((ratio - 1) * 100)}%`; RoiIcon = TrendingDown }
+  } else if (budget === 0 && total === 0) {
+    roiStatus = 'none'; roiText = '-'; RoiIcon = null
+  } else if (total > 0 && closed === 0 && budget > 0) {
+    roiStatus = 'warn'; roiText = `0 Abschl.`; RoiIcon = Minus
+  }
+
   return (
     <TableRow className="hover:bg-slate-50">
       <TableCell>
         <div className="flex flex-col">
-          <span className="text-sm font-medium text-slate-900">{campaign.name}</span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium text-slate-900">{campaign.name}</span>
+            {roiStatus !== 'none' && RoiIcon && (
+              <span
+                className={cn(
+                  'inline-flex items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold shadow-sm',
+                  roiStatus === 'good' && 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                  roiStatus === 'warn' && 'bg-amber-50 text-amber-700 border-amber-200',
+                  roiStatus === 'bad' && 'bg-red-50 text-red-700 border-red-200',
+                )}
+              >
+                <RoiIcon className="h-2.5 w-2.5" />
+                {roiText}
+              </span>
+            )}
+          </div>
           <span className="text-[11px] text-slate-500">ID {campaign.id.slice(0, 8)}</span>
         </div>
       </TableCell>
@@ -150,8 +189,28 @@ function CampaignRow({ campaign }: { campaign: any }) {
           {campaign.is_active ? 'Aktiv' : 'Inaktiv'}
         </span>
       </TableCell>
-      <TableCell className="text-right tabular-nums text-sm">
-        {campaign.budget_amount ? `${formatCurrency(campaign.budget_amount)} €` : '-'}
+      <TableCell className="text-right">
+        <div className="flex flex-col items-end gap-1.5 min-w-[120px]">
+          <span className="text-sm tabular-nums text-slate-900 font-medium">
+            {campaign.budget_amount ? `${formatCurrency(budget)} €` : '-'}
+          </span>
+          {budget > 0 && (
+            <div className="w-full max-w-[120px]">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={cn(
+                    'h-full rounded-full transition-all',
+                    budgetPct >= 0.95 ? 'bg-red-500' : budgetPct >= 0.7 ? 'bg-amber-500' : 'bg-emerald-500',
+                  )}
+                  style={{ width: `${Math.max(budgetPct * 100, budgetPct > 0 ? 2 : 0)}%` }}
+                />
+              </div>
+              <div className="text-[10px] text-slate-500 tabular-nums text-right">
+                {usedBudget} / {budget} Tok · {formatPercent(budgetPct)}
+              </div>
+            </div>
+          )}
+        </div>
       </TableCell>
       <TableCell className="hidden md:table-cell text-xs text-slate-500">
         {formatDateShort(campaign.start_date)}
@@ -160,13 +219,13 @@ function CampaignRow({ campaign }: { campaign: any }) {
         {formatDateShort(campaign.end_date)}
       </TableCell>
       <TableCell className="text-right tabular-nums text-sm font-medium text-slate-900">
-        {stats.total ?? 0}
+        {total}
       </TableCell>
       <TableCell className="text-right tabular-nums text-sm hidden sm:table-cell">
-        {stats.assigned ?? 0}
+        {assignedCount}
       </TableCell>
       <TableCell className="text-right tabular-nums text-sm text-emerald-700 font-medium hidden lg:table-cell">
-        {stats.closed ?? 0}
+        {closed}
       </TableCell>
       <TableCell className="text-right text-xs text-slate-600 tabular-nums hidden lg:table-cell">
         {avgConsumption}
@@ -174,17 +233,17 @@ function CampaignRow({ campaign }: { campaign: any }) {
       <TableCell className="text-right hidden xl:table-cell">
         <span className={cn(
           'text-sm font-medium',
-          stats.quote >= 0.2
+          quote >= 0.2
             ? 'text-emerald-700'
-            : stats.quote >= 0.1
+            : quote >= 0.1
               ? 'text-amber-700'
               : 'text-slate-500'
         )}>
-          {formatPercent(stats.quote)}
+          {formatPercent(quote)}
         </span>
       </TableCell>
       <TableCell className="text-right">
-        <CampaignDialogs.Edit campaign={campaign} />
+        <EditCampaignDialog campaign={campaign} />
       </TableCell>
     </TableRow>
   )

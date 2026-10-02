@@ -16,14 +16,15 @@ export interface ActionResult {
 
 let savePillMounted = false
 
-function ensureSavePillRoot(): HTMLDivElement {
+function ensureSavePillRoot(): HTMLDivElement | null {
+  if (typeof document === 'undefined') return null
   let root = document.getElementById('crm-save-pill-root') as HTMLDivElement | null
   if (!root) {
     root = document.createElement('div')
     root.id = 'crm-save-pill-root'
     root.className =
       'pointer-events-none fixed top-4 left-1/2 -translate-x-1/2 z-[60] flex flex-col items-center gap-2'
-    document.body.appendChild(root)
+    if (document.body) document.body.appendChild(root)
   }
   return root
 }
@@ -31,13 +32,14 @@ function ensureSavePillRoot(): HTMLDivElement {
 export function showSaveIndicator(label = 'Gespeichert') {
   if (typeof document === 'undefined') return
   const root = ensureSavePillRoot()
+  if (!root) return
   const pill = document.createElement('div')
   pill.className =
     'save-pill pointer-events-none inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white/95 backdrop-blur px-3.5 py-1.5 text-xs font-medium text-emerald-700 shadow-lg shadow-emerald-900/10'
   pill.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500"><polyline points="20 6 9 17 4 12"/></svg><span>${label.replace(/"/g, '&quot;')}</span>`
   root.appendChild(pill)
   setTimeout(() => {
-    pill.remove()
+    try { pill.remove() } catch { /* noop */ }
   }, 1700)
 }
 

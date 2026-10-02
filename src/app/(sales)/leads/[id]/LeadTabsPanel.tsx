@@ -9,6 +9,7 @@ import {
   ContactAttemptForm,
   CallbackForm,
   CallbackQuickActions,
+  CancellationRequestCard,
 } from './LeadClientForms'
 import {
   LeadActionBar,
@@ -74,6 +75,9 @@ export type LeadDetailContentProps = {
     assigned_user?: { full_name?: string | null; email?: string | null } | null
     campaign?: { name?: string | null } | null
   }
+  viewerRole: 'admin' | 'seller' | 'super_admin' | string
+  viewerId: string
+  cancellation?: any
   listHref: string
   lastContactAt: string | null
   attemptsCount: number
@@ -93,6 +97,8 @@ export type LeadDetailContentProps = {
 export function LeadDetailContent(props: LeadDetailContentProps) {
   const {
     lead,
+    viewerRole,
+    cancellation,
     lastContactAt,
     attemptsCount,
     openCallbacks,
@@ -123,6 +129,12 @@ export function LeadDetailContent(props: LeadDetailContentProps) {
         leadAgeClass={leadAgeClass}
         openCallbackOverdue={openCallbackOverdue}
         nextCallbackAt={nextCallbackAt}
+        totalTalkTimeSeconds={
+          contactAttempts.reduce(
+            (sum, a) => sum + (typeof a.call_duration_seconds === 'number' ? a.call_duration_seconds : 0),
+            0,
+          ) || null
+        }
       />
 
       {/* 3) Haupt-Grid: Tabs-Card (links) + Sidebar (rechts sticky) */}
@@ -366,6 +378,13 @@ export function LeadDetailContent(props: LeadDetailContentProps) {
             leadAge={leadAge}
             status={lead.status as LeadStatus}
           />
+          {(viewerRole === 'seller' || (cancellation && viewerRole === 'admin')) && (
+            <CancellationRequestCard
+              leadId={lead.id}
+              cancellation={cancellation}
+              role={viewerRole}
+            />
+          )}
           {tags.length > 0 && <CompactTagsSidebar leadId={lead.id} tags={tags as any} />}
           <MiniTimelineSidebar
             attempts={contactAttempts as any}

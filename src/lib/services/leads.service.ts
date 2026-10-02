@@ -288,15 +288,29 @@ export async function addContactAttempt(input: {
   attempt_date: string
   result: string
   notes?: string | null
+  call_duration_seconds?: number | null
 }) {
   const admin = createAdminClient()
-  const { error } = await admin.from('contact_attempts').insert({
+  const insertBase: Record<string, unknown> = {
     lead_id: input.lead_id,
     user_id: input.user_id,
     attempt_date: input.attempt_date,
     result: input.result,
     notes: input.notes ?? null,
-  })
+  }
+  let insert: Record<string, unknown> = { ...insertBase }
+  let durationValid = false
+  if (input.call_duration_seconds !== undefined && input.call_duration_seconds !== null) {
+    const v = Math.max(0, Number(input.call_duration_seconds) || 0)
+    if (v > 0) {
+      insert.call_duration_seconds = v
+      durationValid = true
+    }
+  }
+  let { error } = await admin.from('contact_attempts').insert(insert)
+  if (error && durationValid && /call_duration_seconds/.test(error.message ?? '')) {
+    ;({ error } = await admin.from('contact_attempts').insert(insertBase))
+  }
   if (error) throw error
   await logAudit(input.user_id, 'CONTACT_ATTEMPT', 'lead', input.lead_id, { result: input.result })
 
@@ -428,6 +442,28 @@ export async function getSellerDashboardStats(userId: string) {
   const yestVerloren = yesterdayLost.count ?? 0
   const yestQuote = (yestAbschlüsse + yestVerloren) > 0 ? yestAbschlüsse / (yestAbschlüsse + yestVerloren) : 0
 
+  const trySumDuration = async (gteIso: string, ltIso?: string): Promise<number> => {
+    try {
+      const q = admin
+        .from('contact_attempts')
+        .select('call_duration_seconds')
+        .eq('user_id', userId)
+        .gte('attempt_date', gteIso)
+        .not('call_duration_seconds', 'is', null)
+      const finalQ = ltIso ? q.lt('attempt_date', ltIso) : q
+      const { data, error } = await finalQ
+      if (error || !data) return 0
+      return data.reduce((s: number, r: any) => s + (Number(r.call_duration_seconds) || 0), 0)
+    } catch {
+      return 0
+    }
+  }
+
+  const [todaySec, yestSec] = await Promise.all([
+    trySumDuration(todayISO),
+    trySumDuration(yesterdayISO, todayISO),
+  ])
+
   const pctDiff = (cur: number, base: number): number | null => {
     if (base === 0 && cur === 0) return null
     if (base === 0) return 100
@@ -443,6 +479,11 @@ export async function getSellerDashboardStats(userId: string) {
     abschluss_quote: abschlussQuote,
     callbacks_offen: openCallbacksRes.count ?? 0,
     callbacks_ueberfaellig: overdueCallbacksRes.count ?? 0,
+    talk_time: {
+      today_seconds: todaySec,
+      yesterday_seconds: yestSec,
+      delta_vs_yesterday_pct: pctDiff(todaySec, yestSec),
+    },
     trends: {
       leads_today_vs_yesterday_pct: pctDiff(todayLeadsRes.count ?? 0, yesterdayLeadsToday.count ?? 0),
       abschlussquote_vs_yesterday_pct: pctDiff(abschlussQuote * 100, yestQuote * 100),
@@ -452,12 +493,37 @@ export async function getSellerDashboardStats(userId: string) {
 
 export async function getRecentActivity(userId: string, limit = 10) {
   const admin = createAdminClient()
-  const { data: attempts } = await admin
-    .from('contact_attempts')
-    .select(`id, result, attempt_date, notes, lead:leads(id, first_name, last_name)`)
-    .eq('user_id', userId)
-    .order('attempt_date', { ascending: false })
-    .limit(limit)
+  let attempts: any[] = []
+  try {
+    const res = await admin
+      .from('contact_attempts')
+      .select(`id, result, attempt_date, notes, call_duration_seconds, lead:leads(id, first_name, last_name)`)
+      .eq('user_id', userId)
+      .order('attempt_date', { ascending: false })
+      .limit(limit)
+    attempts = (res.data ?? []) as any[]
+    if (res.error && /call_duration_seconds/.test(res.error.message ?? '')) {
+      const fall = await admin
+        .from('contact_attempts')
+        .select(`id, result, attempt_date, notes, lead:leads(id, first_name, last_name)`)
+        .eq('user_id', userId)
+        .order('attempt_date', { ascending: false })
+        .limit(limit)
+      attempts = (fall.data ?? []) as any[]
+    }
+  } catch {
+    try {
+      const fall = await admin
+        .from('contact_attempts')
+        .select(`id, result, attempt_date, notes, lead:leads(id, first_name, last_name)`)
+        .eq('user_id', userId)
+        .order('attempt_date', { ascending: false })
+        .limit(limit)
+      attempts = (fall.data ?? []) as any[]
+    } catch {
+      attempts = []
+    }
+  }
 
   const { data: statuses } = await admin
     .from('lead_status_history')
@@ -466,7 +532,7 @@ export async function getRecentActivity(userId: string, limit = 10) {
     .order('created_at', { ascending: false })
     .limit(limit)
 
-  return { attempts: attempts ?? [], statuses: statuses ?? [] }
+  return { attempts, statuses: statuses ?? [] }
 }
 
 export async function getUpcomingCallbacks(userId: string, limit = 5) {

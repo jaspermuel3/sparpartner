@@ -7,6 +7,7 @@ import {
   adminResetLeadAction,
   adminCreateLeadAction,
   adminToggleHoldAction,
+  adminDeleteLeadAction,
 } from '@/app/actions'
 import { SubmitButton, useActionFeedback, type ActionResult } from '@/components/ui-custom/FormHelpers'
 import { Button } from '@/components/ui/button'
@@ -29,7 +30,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { UserPlus, RotateCcw, Plus, Snowflake } from 'lucide-react'
+import {
+  UserPlus, RotateCcw, Plus, Snowflake, Trash2
+} from 'lucide-react'
 import { PRODUCT_LABELS, SOURCE_LABELS } from '@/lib/constants'
 
 /* ---------------- Assign Dialog ---------------- */
@@ -37,9 +40,11 @@ import { PRODUCT_LABELS, SOURCE_LABELS } from '@/lib/constants'
 export function AssignLeadDialog({
   leadId,
   sellers,
+  compact,
 }: {
   leadId: string
   sellers: any[]
+  compact?: boolean
 }) {
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
     async (_, fd) => (await adminAssignLeadAction(fd)) as any,
@@ -50,9 +55,21 @@ export function AssignLeadDialog({
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8">
-          <UserPlus className="h-3.5 w-3.5 mr-1" /> Zuweisen
-        </Button>
+        {compact ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 w-8 p-0"
+            title="Lead zuweisen"
+            aria-label="Lead zuweisen"
+          >
+            <UserPlus className="h-3.5 w-3.5" />
+          </Button>
+        ) : (
+          <Button variant="outline" size="sm" className="h-8">
+            <UserPlus className="h-3.5 w-3.5 mr-1" /> Zuweisen
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -120,7 +137,7 @@ export function AssignLeadDialog({
 
 /* ---------------- Reset Dialog ---------------- */
 
-export function ResetLeadDialog({ leadId }: { leadId: string }) {
+export function ResetLeadDialog({ leadId, compact }: { leadId: string; compact?: boolean }) {
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
     async (_, fd) => (await adminResetLeadAction(fd)) as any,
     null,
@@ -130,13 +147,25 @@ export function ResetLeadDialog({ leadId }: { leadId: string }) {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 text-amber-700 border-amber-200 hover:bg-amber-50"
-        >
-          <RotateCcw className="h-3.5 w-3.5 mr-1" /> Zurücksetzen
-        </Button>
+        {compact ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 w-8 p-0 text-amber-700 border-amber-200 hover:bg-amber-50"
+            title="Lead zurücksetzen"
+            aria-label="Lead zurücksetzen"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-amber-700 border-amber-200 hover:bg-amber-50"
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1" /> Zurücksetzen
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -355,16 +384,96 @@ export function CreateLeadDialog({
   )
 }
 
+/* ---------------- Delete Lead Dialog ---------------- */
+
+export function DeleteLeadDialog({ leadId, compact }: { leadId: string; compact?: boolean }) {
+  const [state, formAction] = useFormState<ActionResult | null, FormData>(
+    async (_, fd) => (await adminDeleteLeadAction(fd)) as any,
+    null,
+  )
+  useActionFeedback(state)
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        {compact ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 w-8 p-0 text-red-700 border-red-200 hover:bg-red-50"
+            title="Lead löschen"
+            aria-label="Lead löschen"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-red-700 border-red-200 hover:bg-red-50"
+          >
+            <Trash2 className="h-3.5 w-3.5 mr-1" /> Löschen
+          </Button>
+        )}
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Trash2 className="h-4 w-4 text-red-600" />
+            Lead dauerhaft löschen?
+          </DialogTitle>
+          <DialogDescription>
+            Der Lead wird als gelöscht markiert und aus allen Benutzer-Ansichten entfernt. Datensätze bleiben
+            im Audit-Log erhalten. Diese Aktion kann nicht rückgängig gemacht werden.
+          </DialogDescription>
+        </DialogHeader>
+        <form action={formAction} className="space-y-4">
+          <input type="hidden" name="leadId" value={leadId} />
+          <div className="space-y-1.5">
+            <Label>Grund (optional)</Label>
+            <Textarea
+              name="reason"
+              rows={2}
+              placeholder="Warum wird dieser Lead gelöscht? z.B. Dublette, Test-Datensatz, Kunde hat sich gemeldet…"
+            />
+          </div>
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <div className="font-medium flex items-center gap-1.5">
+              <Trash2 className="h-4 w-4" />
+              Bestätigung erforderlich
+            </div>
+            <div className="text-xs text-red-600 mt-1">
+              Klicke unten auf „Lead löschen“, um die Aktion endgültig auszuführen.
+            </div>
+          </div>
+          {state?.error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {typeof state.error === 'string' ? state.error : 'Es ist ein Fehler aufgetreten.'}
+            </div>
+          )}
+          <DialogFooter>
+            <SubmitButton variant="destructive" size="sm">
+              <Trash2 className="h-4 w-4 mr-1.5" /> Lead löschen
+            </SubmitButton>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /* ---------------- Hold Lead Dialog ---------------- */
 
 export function HoldLeadDialog({
   leadId,
   isOnHold,
   currentNotes,
+  compact,
 }: {
   leadId: string
   isOnHold: boolean
   currentNotes?: string | null
+  compact?: boolean
 }) {
   const [checked, setChecked] = useState(isOnHold)
   const [state, formAction] = useFormState<ActionResult | null, FormData>(
@@ -376,19 +485,36 @@ export function HoldLeadDialog({
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={
-            'h-8 ' +
-            (isOnHold
-              ? 'text-sky-700 border-sky-200 hover:bg-sky-50'
-              : 'text-slate-600 border-slate-200')
-          }
-        >
-          <Snowflake className="h-3.5 w-3.5 mr-1" />
-          {isOnHold ? 'Hold bearbeiten' : 'Auf Eis'}
-        </Button>
+        {compact ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className={
+              'h-8 w-8 p-0 ' +
+              (isOnHold
+                ? 'text-sky-700 border-sky-200 hover:bg-sky-50'
+                : 'text-slate-600 border-slate-200')
+            }
+            title={isOnHold ? 'Hold bearbeiten' : 'Auf Eis legen'}
+            aria-label={isOnHold ? 'Hold bearbeiten' : 'Auf Eis legen'}
+          >
+            <Snowflake className="h-3.5 w-3.5" />
+          </Button>
+        ) : (
+          <Button
+            variant="outline"
+            size="sm"
+            className={
+              'h-8 ' +
+              (isOnHold
+                ? 'text-sky-700 border-sky-200 hover:bg-sky-50'
+                : 'text-slate-600 border-slate-200')
+            }
+          >
+            <Snowflake className="h-3.5 w-3.5 mr-1" />
+            {isOnHold ? 'Hold bearbeiten' : 'Auf Eis'}
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
