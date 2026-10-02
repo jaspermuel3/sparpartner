@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { requireAdmin } from '@/lib/auth'
 import {
   getStatistics,
@@ -299,11 +300,14 @@ export default async function AdminStatsPage({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {top3.map(({ seller, score, rank, perf: p, team }) => {
+                const validId = typeof seller.id === 'string' && seller.id.length >= 5
+                const cardHref = validId ? `/admin/sellers/${seller.id}` : '/admin/sellers'
                 return (
-                  <div
+                  <Link
                     key={seller.id}
+                    href={cardHref}
                     className={cn(
-                      'relative rounded-2xl border p-4 bg-white transition hover:shadow-md',
+                      'relative rounded-2xl border p-4 bg-white transition hover:shadow-md block group',
                       rank === 1
                         ? 'border-amber-200 ring-2 ring-amber-200/60'
                         : rank === 2
@@ -376,7 +380,7 @@ export default async function AdminStatsPage({
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </Link>
                 )
               })}
               {scoredSellers.length > 3 && (
@@ -497,6 +501,8 @@ export default async function AdminStatsPage({
                   </TableRow>
                 ) : (
                   scoredSellers.map(({ seller, perf: p, score, rank, team }) => {
+                    const validId = typeof seller.id === 'string' && seller.id.length >= 5
+                    const detailHref = validId ? `/admin/sellers/${seller.id}` : '/admin/sellers'
                     const pLeads = Number(p?.leads_total ?? 0)
                     const pAbschl = Number(p?.abschlüsse ?? 0)
                     const pVerloren = Number(p?.verloren ?? 0)
@@ -513,15 +519,15 @@ export default async function AdminStatsPage({
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-3">
+                          <Link href={detailHref} className="flex items-center gap-3 group">
                             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-[10px] font-semibold text-white">
                               {(seller.full_name ?? seller.email ?? '?').slice(0, 1).toUpperCase()}
                             </div>
                             <div>
-                              <div className="text-sm font-medium text-slate-900">{seller.full_name ?? 'Kein Name'}</div>
+                              <div className="text-sm font-medium text-slate-900 group-hover:text-indigo-600 transition-colors">{seller.full_name ?? 'Kein Name'}</div>
                               <div className="text-[11px] text-slate-500">{seller.email}</div>
                             </div>
-                          </div>
+                          </Link>
                         </TableCell>
                         <TableCell className="hidden md:table-cell">
                           {team ? (

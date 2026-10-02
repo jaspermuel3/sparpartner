@@ -357,8 +357,8 @@ export default async function AdminSellersPage({
                     </TableCell>
                   </TableRow>
                 )}
-                {rows.map((s) => (
-                  <SellerRow key={s.id} seller={s} teams={teams} />
+                {rows.map((s, i) => (
+                  <SellerRow key={s.id ?? `seller-${i}`} seller={s} teams={teams} />
                 ))}
               </TableBody>
             </Table>
@@ -479,6 +479,8 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
   const p = seller.perf ?? {}
   const isAdmin = seller.role === 'admin'
   const isDeleted = !!seller.is_deleted
+  const validId = typeof seller.id === 'string' && seller.id.length >= 5
+  const detailHref = validId ? `/admin/sellers/${seller.id}` : '/admin/sellers'
   return (
     <TableRow
       className={cn(
@@ -510,7 +512,7 @@ function SellerRow({ seller, teams }: { seller: any; teams: any[] }) {
           <div>
             <div className="flex items-center gap-1.5">
               <Link
-                href={`/admin/sellers/${seller.id}`}
+                href={detailHref}
                 className={cn(
                   'font-medium hover:text-indigo-600 inline-flex items-center gap-1',
                   isDeleted ? 'text-rose-800 line-through decoration-rose-300' : 'text-slate-900',

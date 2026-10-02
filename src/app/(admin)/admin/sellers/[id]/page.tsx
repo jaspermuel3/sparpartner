@@ -50,7 +50,7 @@ export default async function AdminSellerDetailPage({
       .from('users')
       .select(`
         *,
-        team:teams(id, name, color)
+        team:teams!users_team_id_fkey!left(id, name, color)
       `)
       .eq('id', userId)
       .maybeSingle(),
@@ -66,6 +66,12 @@ export default async function AdminSellerDetailPage({
     getAuditLogsForUser(userId, 200),
   ] as any)
 
+  if ((sellerRes as any)?.error) {
+    const err = (sellerRes as any).error
+    throw new Error(
+      `SELLER_DETAIL_QUERY_ERROR: ${err.message ?? String(err)}${err.details ? ' | ' + err.details : ''}${err.hint ? ' | ' + err.hint : ''}`,
+    )
+  }
   const sellerRaw = (sellerRes as any)?.data ?? null
   if (!sellerRaw) {
     notFound()

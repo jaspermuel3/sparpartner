@@ -23,14 +23,19 @@ export async function requestLead(userId: string, product?: ProductType | null):
   if (product) rpcArgs.p_product = product
 
   const { data, error } = await admin.rpc('assign_next_lead_to_user', rpcArgs)
-  if (error || !data) {
-    if (error?.message?.includes('NO_LEAD') || !data) {
+  if (error) {
+    if (error?.message?.includes('NO_LEAD')) {
       throw new Error('NO_LEAD_AVAILABLE')
     }
     throw error
   }
 
-  const leadId = data as string
+  const leadIdRaw = Array.isArray(data) ? (data[0] ?? null) : data
+  if (!leadIdRaw || typeof leadIdRaw !== 'string' || leadIdRaw.length < 5) {
+    throw new Error('NO_LEAD_AVAILABLE')
+  }
+  const leadId = leadIdRaw
+
   const { data: lead } = await admin
     .from('leads')
     .select('id, first_name, last_name, status, assigned_user_id, assigned_at')

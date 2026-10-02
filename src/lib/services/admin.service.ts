@@ -142,13 +142,16 @@ export async function resetSellerPassword(userId: string, newPassword: string) {
 
 export async function getAllSellers() {
   const admin = createAdminClient()
-  const { data } = await admin
+  const { data, error } = await admin
     .from('users')
     .select(`
       *,
-      wallet:token_wallets(balance)
+      wallet:token_wallets!token_wallets_user_id_fkey!left(balance)
     `)
     .order('full_name', { nullsFirst: false })
+  if (error) {
+    throw new Error(`GET_ALL_SELLERS: ${error.message ?? String(error)}`)
+  }
   const rows = (data ?? []) as any[]
   if (!rows.length) return rows
   const emailMap = await getUserEmailMap(rows.map((r: any) => r.id))
@@ -386,23 +389,31 @@ export async function adminAssignLeadToSeller(
   debitTokens: boolean = true,
 ) {
   const admin = createAdminClient()
-  const { error } = await admin.rpc('assign_lead_to_seller', {
+  const { data, error } = await admin.rpc('assign_lead_to_seller', {
     p_lead_id: leadId,
     p_seller_id: sellerId,
     p_charge_token: debitTokens,
   })
+
   if (error) {
+    const msg = (error as any)?.message ?? String(error)
     const code =
-      error.message === 'LEAD_NOT_FOUND' ||
-      error.message === 'ALREADY_ASSIGNED' ||
-      error.message === 'WALLET_NOT_FOUND' ||
-      error.message === 'NOT_ENOUGH_TOKENS' ||
-      error.message === 'SELLER_NOT_FOUND' ||
-      error.message === 'SELLER_INACTIVE'
-        ? error.message
-        : error.message || 'Zuweisung fehlgeschlagen.'
+      msg === 'LEAD_NOT_FOUND' ||
+      msg === 'ALREADY_ASSIGNED' ||
+      msg === 'WALLET_NOT_FOUND' ||
+      msg === 'NOT_ENOUGH_TOKENS' ||
+      msg === 'SELLER_NOT_FOUND' ||
+      msg === 'SELLER_INACTIVE'
+        ? msg
+        : msg || 'Zuweisung fehlgeschlagen.'
     throw new Error(code)
   }
+
+  const success = Array.isArray(data) ? (data[0] === true) : (data === true)
+  if (!success) {
+    throw new Error('LEAD_NOT_ASSIGNED')
+  }
+
   await logAudit(byUserId, 'LEAD_ASSIGNED', 'lead', leadId, {
     to_user: sellerId,
     via: 'admin_manual',
@@ -415,14 +426,22 @@ export async function adminResetLead(leadId: string, byUserId: string, refund: b
   const { data: lead } = await admin.from('leads').select('id, assigned_user_id').eq('id', leadId).maybeSingle()
   const prevUser = (lead as any)?.assigned_user_id
 
-  const { error } = await admin.rpc('reset_lead', {
+  const { data, error } = await admin.rpc('reset_lead', {
     p_lead_id: leadId,
     p_by_user_id: byUserId,
     p_refund: refund,
   })
+
   if (error) {
-    const code = error.message === 'LEAD_NOT_FOUND' ? error.message : error.message || 'Zurücksetzen fehlgeschlagen.'
+    const code = (error as any)?.message === 'LEAD_NOT_FOUND'
+      ? (error as any).message
+      : ((error as any)?.message || 'Zurücksetzen fehlgeschlagen.')
     throw new Error(code)
+  }
+
+  const success = Array.isArray(data) ? (data[0] === true) : (data === true)
+  if (!success) {
+    throw new Error('LEAD_NOT_FOUND')
   }
 
   if (prevUser && refund) {

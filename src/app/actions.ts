@@ -76,6 +76,7 @@ const mapError = (err: unknown): { error: string } => {
   const map: Record<string, string> = {
     NOT_ENOUGH_TOKENS: 'Nicht genügend Tokens.',
     NO_LEAD_AVAILABLE: 'Aktuell ist kein Lead verfügbar. Du kannst dich auf die Warteliste setzen lassen.',
+    LEAD_NOT_ASSIGNED: 'Lead konnte nicht zugewiesen werden. Möglicherweise bereits zugewiesen oder gesperrt.',
     NO_WALLET: 'Token-Wallet nicht gefunden.',
     WALLET_NOT_FOUND: 'Token-Wallet nicht gefunden.',
     UNAUTHENTICATED: 'Bitte melde dich erneut an.',
