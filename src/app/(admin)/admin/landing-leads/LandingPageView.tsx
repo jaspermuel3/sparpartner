@@ -1084,8 +1084,7 @@ function LeadRowView({
       const { error } = await supabase.rpc('assign_lead_to_seller', {
         p_lead_id: row.id,
         p_seller_id: userId,
-        p_by_user_id: null as any,
-        p_debit_tokens: true,
+        p_charge_token: true,
       })
       if (error) throw error
       toast.success('Lead wurde zugewiesen.')
@@ -1385,8 +1384,7 @@ function QuickActionsCard({
           const { error } = await supabase.rpc('assign_lead_to_seller', {
             p_lead_id: ids[i],
             p_seller_id: seller.id,
-            p_by_user_id: null as any,
-            p_debit_tokens: true,
+            p_charge_token: true,
           })
           if (error) throw error
           successCount++

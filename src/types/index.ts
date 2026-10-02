@@ -72,6 +72,7 @@ export interface Team {
   id: string
   name: string
   color: string | null
+  created_by: string | null
   created_at: string
 }
 

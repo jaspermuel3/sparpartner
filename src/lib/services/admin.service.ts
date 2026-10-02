@@ -95,6 +95,15 @@ export async function updateSeller(
   if (error) throw error
 
   if (typeof patch.is_active === 'boolean' && patch.is_active !== (old as DatabaseUser).is_active) {
+    if (patch.is_active === false) {
+      try {
+        await admin.auth.admin.updateUserById(userId, { ban_duration: '36500d' })
+      } catch {}
+    } else {
+      try {
+        await admin.auth.admin.updateUserById(userId, { ban_duration: '0s' })
+      } catch {}
+    }
     await logAudit(updatedBy, patch.is_active ? 'SELLER_ACTIVATED' : 'SELLER_DEACTIVATED', 'user', userId, {
       reason: reason ?? patch.deactivation_reason ?? null,
     })
@@ -358,8 +367,7 @@ export async function adminAssignLeadToSeller(
   const { error } = await admin.rpc('assign_lead_to_seller', {
     p_lead_id: leadId,
     p_seller_id: sellerId,
-    p_by_user_id: byUserId,
-    p_debit_tokens: debitTokens,
+    p_charge_token: debitTokens,
   })
   if (error) {
     const code =
@@ -1508,6 +1516,15 @@ export async function toggleSellerActiveWithReason(
         ? error.message
         : error.message || 'Status-Änderung fehlgeschlagen.'
     throw new Error(code)
+  }
+  if (setActive === false) {
+    try {
+      await admin.auth.admin.updateUserById(userId, { ban_duration: '36500d' })
+    } catch {}
+  } else {
+    try {
+      await admin.auth.admin.updateUserById(userId, { ban_duration: '0s' })
+    } catch {}
   }
   await logAudit(byUserId, setActive ? 'SELLER_ACTIVATED' : 'SELLER_DEACTIVATED', 'user', userId, {
     reason: reason || null,

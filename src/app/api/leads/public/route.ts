@@ -1,6 +1,16 @@
 import { NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { logAudit } from '@/lib/audit'
+import { log } from '@/lib/logging'
+import { getLandingApiKey, isDev, isProd } from '@/lib/env'
+import { rateLimit } from '@/lib/rate-limit'
+import {
+  isValidProduct,
+  isValidPhone,
+  isValidEmail,
+  isValidZip,
+  stripBomWs,
+} from '@/lib/validation'
 import type { ProductType } from '@/types'
 
 export const runtime = 'nodejs'
@@ -25,34 +35,37 @@ type PublicLeadPayload = {
   utm_content?: string | null
 }
 
-const LANDING_API_KEY = process.env.LANDING_API_KEY?.trim()
-
-const ALLOWED_ORIGINS = [
+const PROD_ALLOWED_ORIGINS = [/^https?:\/\/(.*\.)?sparpartner24\.de$/]
+const DEV_ALLOWED_ORIGINS = [
   /^http:\/\/localhost(:\d+)?$/,
   /^http:\/\/127\.0\.0\.1(:\d+)?$/,
-  /^https?:\/\/(.*\.)?sparpartner24\.de$/,
 ]
 
 function getAllowedOrigin(req: Request): string {
   const origin = req.headers.get('origin') ?? ''
-  for (const pattern of ALLOWED_ORIGINS) {
+  const patterns = isProd() ? PROD_ALLOWED_ORIGINS : [...PROD_ALLOWED_ORIGINS, ...DEV_ALLOWED_ORIGINS]
+  for (const pattern of patterns) {
     if (pattern.test(origin)) return origin
   }
-  return process.env.NODE_ENV === 'production' ? '' : origin || '*'
+  return ''
 }
 
 function corsResponseInit(req: Request, init: ResponseInit = {}): ResponseInit {
   const origin = getAllowedOrigin(req)
   const existingHeaders = new Headers(init.headers ?? {})
-  existingHeaders.set('Access-Control-Allow-Origin', origin)
+  existingHeaders.set('Access-Control-Allow-Origin', origin || 'null')
   existingHeaders.set(
     'Access-Control-Allow-Headers',
     'Content-Type, X-API-KEY, x-api-key, Authorization',
   )
-  existingHeaders.set('Access-Control-Allow-Methods', 'POST, OPTIONS, GET')
+  existingHeaders.set('Access-Control-Allow-Methods', 'POST, OPTIONS')
   existingHeaders.set('Access-Control-Allow-Credentials', 'true')
   existingHeaders.set('Access-Control-Max-Age', '86400')
   existingHeaders.set('Vary', 'Origin')
+  // Prevent Clickjacking & MIME-Sniffing auf API-Ebene zusätzlich.
+  existingHeaders.set('X-Frame-Options', 'DENY')
+  existingHeaders.set('X-Content-Type-Options', 'nosniff')
+  existingHeaders.set('Referrer-Policy', 'no-referrer')
   return { ...init, headers: existingHeaders }
 }
 
@@ -60,26 +73,23 @@ function jsonWithCors<T>(req: Request, body: T, init: ResponseInit = {}): NextRe
   return NextResponse.json(body, corsResponseInit(req, init))
 }
 
-function stripBomWs(s?: string | null) {
-  if (!s) return undefined
-  return s.replace(/^\uFEFF+/, '').trim() || undefined
-}
-
-function isValidProduct(p: string): p is ProductType {
-  return p === 'strom' || p === 'gas' || p === 'beides'
-}
-
-function isValidPhone(phone: string) {
-  const digits = phone.replace(/\D/g, '')
-  return digits.length >= 8 && digits.length <= 18
-}
-
-function isValidEmail(email: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-}
-
-function isValidZip(zip: string) {
-  return /^\d{5}$/.test(zip.trim())
+async function timingSafeEqual(a: string, b: string): Promise<boolean> {
+  try {
+    const enc = new TextEncoder()
+    const [ha, hb] = await Promise.all([
+      crypto.subtle.digest('SHA-256', enc.encode(a)),
+      crypto.subtle.digest('SHA-256', enc.encode(b)),
+    ])
+    if (ha.byteLength !== hb.byteLength) return false
+    const va = new Uint8Array(ha)
+    const vb = new Uint8Array(hb)
+    let diff = 0
+    for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i]
+    return diff === 0
+  } catch {
+    // Fallback: explizit KEINEN direkten String-Vergleich, um Timing zu vermeiden.
+    return false
+  }
 }
 
 export async function OPTIONS(req: Request) {
@@ -87,23 +97,57 @@ export async function OPTIONS(req: Request) {
 }
 
 export async function POST(req: Request) {
-  try {
-    const apiKeyFromHeader = stripBomWs(req.headers.get('x-api-key') ?? req.headers.get('X-API-KEY'))
+  // ---------- Rate-Limit (pro IP) ----------
+  const rl = rateLimit(req, 'publicLeads')
+  const rlHeaders = {
+    'X-RateLimit-Limit': String(rl.limit),
+    'X-RateLimit-Remaining': String(rl.remaining),
+  } as HeadersInit
+  if (!rl.ok) {
+    const secs = Math.max(1, Math.ceil(rl.retryAfterMs / 1000))
+    return jsonWithCors(
+      req,
+      { error: 'TOO_MANY_REQUESTS' },
+      {
+        status: 429,
+        headers: { ...rlHeaders, 'Retry-After': String(secs) },
+      },
+    )
+  }
 
-    if (!LANDING_API_KEY || LANDING_API_KEY.length < 16) {
-      console.error('[PUBLIC_LEADS] LANDING_API_KEY ist nicht oder zu kurz gesetzt (min. 16 Zeichen).')
-      return jsonWithCors(req, { error: 'SERVER_MISCONFIGURED' }, { status: 500 })
+  try {
+    const apiKeyFromHeader = stripBomWs(
+      req.headers.get('x-api-key') ?? req.headers.get('X-API-KEY'),
+    )
+
+    let landingKey: string
+    try {
+      landingKey = getLandingApiKey()
+    } catch (envErr: unknown) {
+      log.error('PUBLIC_LEADS', 'LANDING_API_KEY Konfiguration unvollständig', undefined, envErr)
+      return jsonWithCors(
+        req,
+        { error: 'SERVER_MISCONFIGURED' },
+        { status: 500, headers: rlHeaders },
+      )
     }
 
-    if (!apiKeyFromHeader || apiKeyFromHeader !== LANDING_API_KEY) {
-      return jsonWithCors(req, { error: 'UNAUTHORIZED' }, { status: 401 })
+    const keyMatch = apiKeyFromHeader
+      ? await timingSafeEqual(apiKeyFromHeader, landingKey)
+      : false
+    if (!keyMatch) {
+      log.warn('PUBLIC_LEADS', 'API-Key Abgelehnt', {
+        hasKey: Boolean(apiKeyFromHeader),
+        origin: getAllowedOrigin(req) || 'none',
+      })
+      return jsonWithCors(req, { error: 'UNAUTHORIZED' }, { status: 401, headers: rlHeaders })
     }
 
     let body: PublicLeadPayload
     try {
       body = (await req.json()) as PublicLeadPayload
     } catch {
-      return jsonWithCors(req, { error: 'INVALID_JSON' }, { status: 400 })
+      return jsonWithCors(req, { error: 'INVALID_JSON' }, { status: 400, headers: rlHeaders })
     }
 
     const errors: Record<string, string> = {}
@@ -140,26 +184,36 @@ export async function POST(req: Request) {
     }
 
     if (Object.keys(errors).length > 0) {
-      return jsonWithCors(req, { error: 'VALIDATION_FAILED', errors }, { status: 422 })
+      return jsonWithCors(
+        req,
+        { error: 'VALIDATION_FAILED', errors },
+        { status: 422, headers: rlHeaders },
+      )
     }
 
     const admin = createAdminClient()
 
     let campaignId: string | null = null
     if (body.utm_campaign && body.utm_campaign.trim()) {
-      const { data: camp } = await admin
-        .from('campaigns')
-        .select('id')
-        .or(`external_id.eq.${body.utm_campaign.trim()},name.ilike.%${body.utm_campaign.trim()}%`)
-        .eq('is_active', true)
-        .limit(1)
-        .maybeSingle()
-      if (camp) campaignId = (camp as any).id
+      try {
+        const { data: camp } = await admin
+          .from('campaigns')
+          .select('id')
+          .or(`external_id.eq.${body.utm_campaign.trim()},name.ilike.%${body.utm_campaign.trim()}%`)
+          .eq('is_active', true)
+          .limit(1)
+          .maybeSingle()
+        if (camp) campaignId = (camp as unknown as { id: string }).id
+      } catch (e) {
+        log.warn('PUBLIC_LEADS', 'Campaign-Auflösung fehlgeschlagen (ignoriert)', {
+          utm_campaign: body.utm_campaign,
+        }, e)
+      }
     }
 
     const notesParts: string[] = ['[Landing Page Sparpartner24]']
-    if (body.wants_consultation) notesParts.push('✅ Beratungsgespräch gewünscht')
-    else notesParts.push('❌ Kein Beratungsgespräch gewünscht')
+    if (body.wants_consultation) notesParts.push('Beratungsgespräch gewünscht')
+    else notesParts.push('Kein Beratungsgespräch gewünscht')
     const utm: string[] = []
     if (body.utm_source) utm.push(`source=${body.utm_source}`)
     if (body.utm_medium) utm.push(`medium=${body.utm_medium}`)
@@ -168,7 +222,7 @@ export async function POST(req: Request) {
     if (body.utm_content) utm.push(`content=${body.utm_content}`)
     if (utm.length > 0) notesParts.push(`UTM: ${utm.join(' | ')}`)
 
-    const insertPayload: any = {
+    const insertPayload: Record<string, unknown> = {
       first_name: body.first_name.trim(),
       last_name: body.last_name.trim(),
       phone: body.phone.trim(),
@@ -188,8 +242,8 @@ export async function POST(req: Request) {
 
     let leadId: string | null = null
 
-    try {
-      insertPayload.source = 'landing_page'
+    const tryInsert = async (source: string): Promise<string | null> => {
+      insertPayload.source = source
       const { data, error } = await admin
         .from('leads')
         .insert(insertPayload)
@@ -197,27 +251,29 @@ export async function POST(req: Request) {
         .limit(1)
         .maybeSingle()
       if (error || !data) {
+        log.warn('PUBLIC_LEADS', `Lead-Insert mit source="${source}" fehlgeschlagen`, undefined, error)
         throw error ?? new Error('NO_DATA')
       }
-      leadId = (data as any).id
-    } catch (landingSourceErr: any) {
-      const msg = landingSourceErr?.message ?? String(landingSourceErr ?? '')
+      return (data as unknown as { id: string }).id
+    }
+
+    try {
+      leadId = await tryInsert('landing_page')
+    } catch (landingSourceErr: unknown) {
+      const msg =
+        landingSourceErr instanceof Error
+          ? landingSourceErr.message
+          : String(landingSourceErr ?? '')
       if (msg.includes('lead_source') || msg.includes('invalid input') || msg.includes('enum')) {
-        insertPayload.source = 'sonstiges'
-        const { data, error } = await admin
-          .from('leads')
-          .insert(insertPayload)
-          .select('id')
-          .limit(1)
-          .maybeSingle()
-        if (error || !data) {
-          console.error('[PUBLIC_LEADS] Insert mit Fallback-Source fehlgeschlagen:', error)
-          throw error ?? new Error('INSERT_FAILED_FALLBACK')
+        try {
+          leadId = await tryInsert('sonstiges')
+        } catch (fbErr) {
+          log.error('PUBLIC_LEADS', 'Insert mit Fallback-Source fehlgeschlagen', undefined, fbErr)
+          throw fbErr instanceof Error ? fbErr : new Error('INSERT_FAILED_FALLBACK')
         }
-        leadId = (data as any).id
       } else {
-        console.error('[PUBLIC_LEADS] Insert fehlgeschlagen:', landingSourceErr)
-        throw landingSourceErr
+        log.error('PUBLIC_LEADS', 'Insert fehlgeschlagen', undefined, landingSourceErr)
+        throw landingSourceErr instanceof Error ? landingSourceErr : new Error('INSERT_FAILED')
       }
     }
 
@@ -229,46 +285,13 @@ export async function POST(req: Request) {
         campaign: body.utm_campaign ?? null,
       },
       wants_consultation: !!body.wants_consultation,
+    }).catch((e) => log.warn('PUBLIC_LEADS', 'Audit-Log fehlgeschlagen (swallowed)', undefined, e))
+
+    log.info('PUBLIC_LEADS', 'Lead erfolgreich angelegt', {
+      lead_id: leadId,
+      product: body.product,
+      source: 'landing_page_api',
     })
-
-    try {
-      const { data: users } = await admin
-        .from('users')
-        .select('id')
-        .eq('role', 'admin')
-        .eq('is_active', true)
-      const notifTitle = `Neuer Lead: ${body.first_name.trim()} ${body.last_name.trim()}`
-      const productLabel =
-        body.product === 'strom' ? 'Strom' : body.product === 'gas' ? 'Gas' : 'Strom + Gas'
-      const location = [body.zip, body.city].filter(Boolean).join(' ').trim()
-      const notifBody = [
-        `Produkt: ${productLabel}`,
-        location ? `Ort: ${location}` : null,
-        body.phone ? `Tel.: ${body.phone.trim()}` : null,
-        body.wants_consultation ? 'Beratung gewünscht ✅' : null,
-      ]
-        .filter(Boolean)
-        .join(' · ')
-
-      const link = `/leads/${leadId}`
-
-      for (const u of (users ?? []) as any[]) {
-        try {
-          await admin.rpc('create_notification', {
-            p_user_id: u.id,
-            p_type: 'LEAD_NEW',
-            p_title: notifTitle,
-            p_body: notifBody,
-            p_link: link,
-            p_data: { lead_id: leadId, source: 'landing_page' },
-          })
-        } catch (notifErr) {
-          console.warn(`[PUBLIC_LEADS] Benachrichtigung an Admin ${u.id} fehlgeschlagen:`, notifErr)
-        }
-      }
-    } catch (adminNotifErr) {
-      console.warn('[PUBLIC_LEADS] Admin-Benachrichtigungen übersprungen:', adminNotifErr)
-    }
 
     return jsonWithCors(
       req,
@@ -277,17 +300,19 @@ export async function POST(req: Request) {
         lead_id: leadId,
         savings_estimate_eur: calculateSavingsEstimate(body),
       },
-      { status: 200 },
+      { status: 200, headers: rlHeaders },
     )
-  } catch (err: any) {
-    console.error('[PUBLIC_LEADS] Unhandled error:', err)
+  } catch (err: unknown) {
+    log.error('PUBLIC_LEADS', 'Unhandled error', undefined, err)
     return jsonWithCors(
       req,
       {
         error: 'INTERNAL_ERROR',
-        message: process.env.NODE_ENV === 'development' ? String(err?.message ?? err) : undefined,
+        message: isDev()
+          ? err instanceof Error ? err.message : String(err)
+          : undefined,
       },
-      { status: 500 },
+      { status: 500, headers: rlHeaders },
     )
   }
 }
@@ -295,14 +320,10 @@ export async function POST(req: Request) {
 function calculateSavingsEstimate(p: PublicLeadPayload): number {
   let euros = 0
   if ((p.product === 'strom' || p.product === 'beides') && p.power_consumption) {
-    const avgCentsPerKwh = 30
-    const savingCentsPerKwh = 4
-    euros += (Number(p.power_consumption) * savingCentsPerKwh) / 100
-    void avgCentsPerKwh
+    euros += (Number(p.power_consumption) * 4) / 100
   }
   if ((p.product === 'gas' || p.product === 'beides') && p.gas_consumption) {
-    const savingCentsPerKwh = 2
-    euros += (Number(p.gas_consumption) * savingCentsPerKwh) / 100
+    euros += (Number(p.gas_consumption) * 2) / 100
   }
   if (euros === 0) euros = 350
   return Math.max(150, Math.min(900, Math.round(euros)))

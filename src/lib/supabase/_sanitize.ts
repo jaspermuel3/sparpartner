@@ -1,3 +1,17 @@
+/* ============================================================
+   Kompatibilitäts-Wrapper.
+
+   Alle neuen Komponenten sollten direkt `src/lib/env.ts`
+   verwenden. Diese Datei bleibt bestehen, damit bestehende
+   Imports nicht brechen.
+   ============================================================ */
+
+import {
+  getSupabaseUrl as envUrl,
+  getSupabaseAnonKey as envAnon,
+  getSupabaseServiceRoleKey as envService,
+} from '../env'
+
 export function stripBomAndWs(v: string | null | undefined): string {
   if (v === undefined || v === null) return ''
   let s = String(v)
@@ -6,14 +20,7 @@ export function stripBomAndWs(v: string | null | undefined): string {
   return s.replace(/[\u200b-\u200f\ufeff\ufffe]/g, '').trim()
 }
 
-export function getSupabaseUrl(): string {
-  return stripBomAndWs(process.env.NEXT_PUBLIC_SUPABASE_URL)
-}
-
-export function getSupabaseAnonKey(): string {
-  return stripBomAndWs(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
-}
-
-export function getSupabaseServiceRoleKey(): string {
-  return stripBomAndWs(process.env.SUPABASE_SERVICE_ROLE_KEY)
-}
+/* ---------- Delegation an env.ts (Validierung ist dort zentral) ---------- */
+export const getSupabaseUrl = (): string => stripBomAndWs(envUrl())
+export const getSupabaseAnonKey = (): string => stripBomAndWs(envAnon())
+export const getSupabaseServiceRoleKey = (): string => stripBomAndWs(envService())
