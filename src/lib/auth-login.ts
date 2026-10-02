@@ -10,6 +10,7 @@
 import { createClient } from './supabase/server'
 import { createAdminClient } from './supabase/admin'
 import { log, tryLog } from './logging'
+import { getMaintenanceMode } from './services/system.service'
 import { validateLeadField as _val, validatePasswordPolicy, isValidEmail } from './validation'
 
 export type AuthenticatedUser = {
@@ -194,6 +195,27 @@ export async function runLoginFlow(input: {
   if (!dbUser.is_active) {
     await tryLog('AUTH', undefined, () => supabase.auth.signOut(), 'signOut bei inactive User')
     return fail('inactive')
+  }
+
+  if (dbUser.role !== 'admin') {
+    try {
+      const mm = await getMaintenanceMode()
+      if (mm.enabled) {
+        await tryLog(
+          'AUTH',
+          undefined,
+          () => supabase.auth.signOut(),
+          'signOut bei aktivem Wartungsmodus (Seller)',
+        )
+        return fail('MAINTENANCE_MODE:' + (mm.message || 'Wartungsarbeiten. Bitte versuche es später erneut.'))
+      }
+    } catch (e: any) {
+      const errMsg = String(e?.message ?? e ?? '')
+      if (errMsg.startsWith('MAINTENANCE_MODE:')) {
+        await tryLog('AUTH', undefined, () => supabase.auth.signOut(), 'signOut wegen MAINTENANCE_MODE')
+        return fail(errMsg)
+      }
+    }
   }
 
   const resultUser: AuthenticatedUser = {

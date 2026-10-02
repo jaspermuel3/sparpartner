@@ -99,6 +99,7 @@ export const CALLBACK_STATUS_LABELS: Record<CallbackStatus, string> = {
 
 export const TOKEN_TYPE_LABELS: Record<TokenTransactionType, string> = {
   aufladung: 'Aufladung',
+  abbuchung: 'Abbuchung',
   lead_kauf: 'Lead-Kauf',
   rueckerstattung: 'Rückerstattung',
   korrektur_plus: 'Korrektur +',

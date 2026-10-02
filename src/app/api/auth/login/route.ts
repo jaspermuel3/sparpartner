@@ -4,13 +4,13 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { getSupabaseUrl, getSupabaseAnonKey } from '@/lib/supabase/_sanitize'
 import { log, tryLog } from '@/lib/logging'
 import {
-  rateLimit,
   loginThrottle,
   recordLoginFailure,
   recordLoginSuccess,
 } from '@/lib/rate-limit'
 import { validatePasswordPolicy, isValidEmail } from '@/lib/validation'
 import { isProd } from '@/lib/env'
+import { getMaintenanceMode } from '@/lib/services/system.service'
 
 function copyCookies(from: NextResponse, to: NextResponse) {
   for (const c of from.cookies.getAll()) {
@@ -34,17 +34,6 @@ export async function POST(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } })
   const loginRedirect = request.nextUrl.clone()
   loginRedirect.pathname = '/login'
-
-  // ---------- Rate-Limit (IP-basiert) ----------
-  const ipLimit = rateLimit(request, 'login')
-  if (!ipLimit.ok) {
-    const secs = Math.max(1, Math.ceil(ipLimit.retryAfterMs / 1000))
-    loginRedirect.searchParams.set('error', 'ZU_VIELE_VERSUCHE')
-    loginRedirect.searchParams.set('retry_after', String(secs))
-    const res = NextResponse.redirect(loginRedirect, { status: 303 })
-    res.headers.set('Retry-After', String(secs))
-    return copyCookies(response, res)
-  }
 
   const formData = await request.formData().catch(() => null)
   if (!formData) {
@@ -97,7 +86,10 @@ export async function POST(request: NextRequest) {
 
     if (!getSupabaseUrl() || !getSupabaseAnonKey()) {
       loginRedirect.searchParams.set('error', 'Server-Konfiguration unvollständig. Supabase-URL oder Anon-Key fehlen.')
-      const errInit = applyRateLimitHeaders({ status: 303 }, ipLimit)
+      const errInit = applyRateLimitHeaders({ status: 303 }, {
+        limit: 25,
+        remaining: throttle?.ipRemaining ?? 0,
+      })
       return copyCookies(response, NextResponse.redirect(loginRedirect, errInit))
     }
 
@@ -260,6 +252,29 @@ export async function POST(request: NextRequest) {
       recordLoginFailure(email)
       loginRedirect.searchParams.set('error', 'inactive')
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
+    }
+
+    if (dbUser.role !== 'admin') {
+      try {
+        const mm = await getMaintenanceMode()
+        if (mm.enabled) {
+          await tryLog(
+            'AUTH',
+            undefined,
+            () => supabase.auth.signOut(),
+            'signOut bei aktivem Wartungsmodus (Seller)',
+          )
+          recordLoginFailure(email)
+          loginRedirect.searchParams.set('maintenance', '1')
+          loginRedirect.searchParams.set(
+            'm',
+            encodeURIComponent(mm.message || 'Wartungsarbeiten. Bitte versuche es später erneut.'),
+          )
+          return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
+        }
+      } catch (e: any) {
+        log.warn('AUTH', 'Maintenance-Check im Login-Route fehlgeschlagen (swallowed, weiter)', undefined, e)
+      }
     }
 
     if (dbUser.last_login_at) {

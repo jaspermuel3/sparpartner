@@ -36,6 +36,7 @@ export type CallbackStatus = 'offen' | 'erledigt' | 'storniert'
 
 export type TokenTransactionType =
   | 'aufladung'
+  | 'abbuchung'
   | 'lead_kauf'
   | 'rueckerstattung'
   | 'korrektur_plus'

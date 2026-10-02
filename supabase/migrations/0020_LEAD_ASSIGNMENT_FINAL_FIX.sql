@@ -116,6 +116,8 @@ BEGIN
   END;
 
   -- Pool wählen: SELBE Filter wie getAvailableLeadCountBreakdown()
+  -- WICHTIG: product ist product_type (ENUM). Cast auf TEXT, um
+  -- "operator does not exist: product_type = text" bei p_product TEXT zu vermeiden.
   WITH pool AS (
     SELECT id FROM public.leads
     WHERE assigned_user_id IS NULL
@@ -124,9 +126,9 @@ BEGIN
       AND is_on_hold = FALSE         -- Fix BUG(1)
       AND status NOT IN ('canceled','wrong_data','no_interest','closed')
       AND (
-            v_product_norm IS NULL                   -- → alle Produkte
-            OR product = v_product_norm              -- → genau gesuchtes Produkt
-            OR product = 'beides'                    -- → beides gilt IMMER als Treffer
+            v_product_norm IS NULL                        -- → alle Produkte
+            OR product::TEXT = v_product_norm             -- → genau gesuchtes Produkt (CAST!)
+            OR product::TEXT = 'beides'                   -- → beides gilt IMMER als Treffer (CAST!)
           )
     ORDER BY created_at ASC, id ASC
     LIMIT 1
@@ -342,51 +344,72 @@ COMMENT ON FUNCTION public.get_contact_time_heatmap(UUID,INT) IS
 -- ============================================================
 -- (7) DIAGNOSE — ausführen, um zu sehen OB DIE MIGRATION GRÜN IST
 -- ============================================================
--- Alle 4 Lead-Konsistenzfilter (is_deleted, archived, is_on_hold)
--- MÜSSEN in assign_next_lead_to_user und assign_lead_to_seller
--- vorhanden sein.
+-- WICHTIG: UNION ALL erbt Spaltennamen von der ERSTEN SELECT-Zeile!
+-- Deshalb nutzen wir für alle Teil-Selects konsistente Aliase.
+--
+-- Interpretationshilfe:
+--   assign_next_lead_to_user  → c1=is_deleted, c2=archived, c3=is_on_hold, c4=TRIM, c5=beides-Fallback
+--   assign_lead_to_seller    → c1=is_deleted, c2=archived, c3=is_on_hold
+--   reset_lead               → c1=p_by_user_id-Param vorhanden, c2=archived-Filter, c3=p_refund-Param vorhanden
 -- ============================================================
 WITH checks AS (
+  -- assign_next_lead_to_user: 5 Check-Spalten
   SELECT
-    'assign_next_lead_to_user' AS funktion,
-    CASE WHEN prosrc ILIKE '%is_deleted = FALSE%'       THEN 1 ELSE 0 END AS has_is_deleted,
-    CASE WHEN prosrc ILIKE '%archived = FALSE%'         THEN 1 ELSE 0 END AS has_archived,
-    CASE WHEN prosrc ILIKE '%is_on_hold = FALSE%'       THEN 1 ELSE 0 END AS has_is_on_hold,
-    CASE WHEN prosrc ILIKE '%TRIM(%'                    THEN 1 ELSE 0 END AS has_trim,
-    CASE WHEN prosrc ILIKE '%product = ''beides''%'     THEN 1 ELSE 0 END AS has_beides_fallback
+    'assign_next_lead_to_user'::TEXT AS funktion,
+    CASE WHEN prosrc ILIKE '%is_deleted = FALSE%'       THEN 1 ELSE 0 END AS c1,
+    CASE WHEN prosrc ILIKE '%archived = FALSE%'         THEN 1 ELSE 0 END AS c2,
+    CASE WHEN prosrc ILIKE '%is_on_hold = FALSE%'       THEN 1 ELSE 0 END AS c3,
+    CASE WHEN prosrc ILIKE '%TRIM(%'                    THEN 1 ELSE 0 END AS c4,
+    CASE WHEN prosrc ILIKE '%product = ''beides''%'     THEN 1 ELSE 0 END AS c5
   FROM pg_proc WHERE proname = 'assign_next_lead_to_user'
+
   UNION ALL
+
+  -- assign_lead_to_seller: 3 Check-Spalten
   SELECT
-    'assign_lead_to_seller' AS funktion,
+    'assign_lead_to_seller'::TEXT,
     CASE WHEN prosrc ILIKE '%is_deleted = FALSE%'       THEN 1 ELSE 0 END,
     CASE WHEN prosrc ILIKE '%archived = FALSE%'         THEN 1 ELSE 0 END,
     CASE WHEN prosrc ILIKE '%is_on_hold = FALSE%'       THEN 1 ELSE 0 END,
     0, 0
   FROM pg_proc WHERE proname = 'assign_lead_to_seller'
+
   UNION ALL
+
+  -- reset_lead: 3 Check-Spalten (hier sind c1 und c3 anders belegt!)
   SELECT
-    'reset_lead' AS funktion,
-    CASE WHEN prosrc ILIKE '%p_by_user_id%'             THEN 1 ELSE 0 END AS param_by_user_id_ok,
-    CASE WHEN prosrc ILIKE '%archived = FALSE%'         THEN 1 ELSE 0 END,
-    CASE WHEN prosrc ILIKE '%p_refund%'                 THEN 1 ELSE 0 END AS param_refund_ok,
+    'reset_lead'::TEXT,
+    CASE WHEN prosrc ILIKE '%p_by_user_id%'             THEN 1 ELSE 0 END,  -- c1 = Param p_by_user_id (NAMED!)
+    CASE WHEN prosrc ILIKE '%archived = FALSE%'         THEN 1 ELSE 0 END,  -- c2 = archived Filter
+    CASE WHEN prosrc ILIKE '%p_refund%'                 THEN 1 ELSE 0 END,  -- c3 = Param p_refund (NAMED!)
     0, 0
   FROM pg_proc WHERE proname = 'reset_lead'
 )
 SELECT
   funktion,
-  has_is_deleted + has_archived + has_is_on_hold + has_trim + has_beides_fallback AS gesamt_checks,
+  CASE funktion
+    WHEN 'assign_next_lead_to_user' THEN c1 + c2 + c3 + c4 + c5
+    WHEN 'assign_lead_to_seller'    THEN c1 + c2 + c3
+    WHEN 'reset_lead'               THEN c1 + c2 + c3
+    ELSE 0
+  END AS gesamt_checks,
   CASE
-    WHEN funktion = 'assign_next_lead_to_user' AND has_is_deleted + has_archived + has_is_on_hold + has_trim + has_beides_fallback = 5
-      THEN 'OK ✅'
-    WHEN funktion = 'assign_lead_to_seller' AND has_is_deleted + has_archived + has_is_on_hold = 3
-      THEN 'OK ✅'
-    WHEN funktion = 'reset_lead' AND param_by_user_id_ok + has_archived + param_refund_ok = 3
-      THEN 'OK ✅'
+    WHEN funktion = 'assign_next_lead_to_user' AND c1 + c2 + c3 + c4 + c5 = 5  THEN 'OK ✅'
+    WHEN funktion = 'assign_lead_to_seller'    AND c1 + c2 + c3 = 3            THEN 'OK ✅'
+    WHEN funktion = 'reset_lead'               AND c1 + c2 + c3 = 3            THEN 'OK ✅'
     ELSE 'FEHLT ❌'
   END AS status,
-  has_is_deleted AS filter_is_deleted,
-  has_archived AS filter_archived,
-  has_is_on_hold AS filter_is_on_hold,
-  has_trim AS produkt_trim,
-  has_beides_fallback AS produkt_beides_fallback
-FROM checks;
+  -- Detail-Spalten (Bedeutung je nach Funktion siehe oben!)
+  c1 AS check_c1,
+  c2 AS check_c2_archived,
+  c3 AS check_c3,
+  c4 AS check_c4_produkt_trim,
+  c5 AS check_c5_produkt_beides_fallback
+FROM checks
+
+ORDER BY CASE funktion
+  WHEN 'assign_next_lead_to_user' THEN 1
+  WHEN 'assign_lead_to_seller'    THEN 2
+  WHEN 'reset_lead'               THEN 3
+  ELSE 99
+END;

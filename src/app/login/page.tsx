@@ -1,10 +1,140 @@
 import { LoginForm } from './LoginForm'
-import { Sparkles, ShieldCheck, Zap, Clock3 } from 'lucide-react'
+import { Sparkles, ShieldCheck, Zap, Clock3, Wrench, ArrowLeft } from 'lucide-react'
 import Image from 'next/image'
 
 export const metadata = { title: 'Anmelden · Sparpartner CRM' }
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ maintenance?: string; m?: string; error?: string }>
+}) {
+  const resolved = await searchParams
+  const isMaintenance = (resolved.maintenance ?? '').trim() === '1'
+  const maintenanceMessage = (() => {
+    const raw = (resolved.m ?? '').trim()
+    if (!raw) return 'Wartungsarbeiten. Bitte versuche es später erneut.'
+    try { return decodeURIComponent(raw) } catch { return raw }
+  })()
+
+  if (isMaintenance) {
+    return (
+      <div className="min-h-screen bg-slate-50 text-slate-900 antialiased">
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 overflow-hidden"
+        >
+          <div className="absolute -left-40 top-20 h-96 w-96 rounded-full bg-amber-200/40 blur-3xl" />
+          <div className="absolute -right-32 top-0 h-80 w-80 rounded-full bg-indigo-200/30 blur-3xl" />
+          <div className="absolute bottom-0 left-1/3 h-80 w-80 rounded-full bg-emerald-200/20 blur-3xl" />
+        </div>
+
+        <div className="relative mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 py-10 sm:px-6 lg:px-8">
+          <header className="flex items-center justify-between">
+            <div className="inline-flex items-center gap-3">
+              <Image
+                src="/sparpartner-logo.svg"
+                alt="Sparpartner24 Logo"
+                width={44}
+                height={44}
+                className="h-11 w-11 drop-shadow-sm"
+                priority
+              />
+              <div className="leading-tight">
+                <div className="text-[15px] font-semibold tracking-tight">Sparpartner CRM</div>
+                <div className="text-xs text-slate-500">Strom- &amp; Gasvertrieb</div>
+              </div>
+            </div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-medium text-amber-800 backdrop-blur">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-amber-500" />
+              </span>
+              Wartungsmodus aktiv
+            </div>
+          </header>
+
+          <main className="flex flex-1 items-center justify-center py-14">
+            <div className="relative w-full max-w-xl">
+              <div
+                aria-hidden="true"
+                className="absolute -inset-2 rounded-[28px] bg-gradient-to-br from-amber-200/50 via-white to-indigo-200/30 blur-xl"
+              />
+              <div className="relative rounded-2xl border border-amber-100 bg-white/85 p-7 shadow-xl shadow-amber-900/5 backdrop-blur sm:p-10">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-700 shadow-inner">
+                    <Wrench className="h-5 w-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
+                      Das CRM wird gerade gewartet.
+                    </h1>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Wir sind in wenigen Minuten wieder für dich da.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 rounded-2xl border border-amber-100 bg-amber-50/60 px-4 py-4 text-sm leading-6 text-amber-900">
+                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-700/90">
+                    Hinweis vom Administrator
+                  </div>
+                  <div className="whitespace-pre-wrap break-words">
+                    {maintenanceMessage}
+                  </div>
+                </div>
+
+                <div className="mt-6 flex items-start gap-3 rounded-xl border border-slate-200/80 bg-slate-50/60 px-4 py-3 text-xs text-slate-600">
+                  <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+                  <div>
+                    <strong className="text-slate-800">Was bedeutet das?</strong>{' '}
+                    Admins haben aktuell uneingeschränkten Zugriff. Als Verkäufer wirst du nach
+                    Abschluss der Arbeiten automatisch auf deinen normalen Startbildschirm
+                    weitergeleitet – ein erneuter Login ist im Regelfall ausreichend.
+                  </div>
+                </div>
+
+                <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50 sm:w-auto"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Status erneut prüfen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = new URL(window.location.href)
+                      url.searchParams.delete('maintenance')
+                      url.searchParams.delete('m')
+                      window.location.href = url.toString()
+                    }}
+                    className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-slate-800 sm:w-auto"
+                  >
+                    Zum Anmeldeformular
+                  </button>
+                </div>
+
+                <p className="mt-8 text-center text-[11px] leading-relaxed text-slate-400">
+                  Dringender Bedarf? Wende dich direkt an deinen Administrator.
+                </p>
+              </div>
+            </div>
+          </main>
+
+          <footer className="mt-auto flex flex-col items-center justify-between gap-2 border-t border-slate-200/60 pt-5 text-[11px] text-slate-400 sm:flex-row">
+            <p>© {new Date().getFullYear()} Sparpartner CRM · Interne Nutzung</p>
+            <p className="text-slate-400/80">
+              Fragen zum Zugriff? Wende dich an den Admin.
+            </p>
+          </footer>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 antialiased">
       <div

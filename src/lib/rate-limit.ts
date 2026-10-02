@@ -2,7 +2,7 @@
    Einfaches In-Memory Rate Limiting (Zero-Dependency)
    ------------------------------------------------------------
    - Identifiziert Clients per IP (X-Forwarded-For, fallback Remote-IP)
-   - Token-Bucket pro Key
+   - Token-Bucket pro Key mit kontinuierlichem Refill
    - Single-Node tauglich; bei Multi-Node/Serverless unbedingt
      später auf Redis/Upstash umstellen (gleiches Interface)
    ============================================================ */
@@ -20,9 +20,15 @@ export type RateLimitConfig = {
 const STORE: Map<string, Bucket> = new Map()
 
 const DEFAULT_CONFIGS: Record<string, RateLimitConfig> = {
-  login: { max: 8, windowMs: 10 * 60 * 1000 }, // 8 Versuche / 10 min
-  publicLeads: { max: 60, windowMs: 60 * 1000 }, // 60 / min (pro IP)
-  generic: { max: 240, windowMs: 60 * 1000 },
+  login: { max: 25, windowMs: 10 * 60 * 1000, refillIntervalMs: 30 * 1000 },
+  publicLeads: { max: 60, windowMs: 60 * 1000, refillIntervalMs: 1_000 },
+  generic: { max: 240, windowMs: 60 * 1000, refillIntervalMs: 1_000 },
+}
+
+const LOGIN_FAIL_CONFIG: RateLimitConfig = {
+  max: 20,
+  windowMs: 30 * 60 * 1000,
+  refillIntervalMs: 2 * 60 * 1000,
 }
 
 function getClientIp(req: Request | { headers: Headers }): string {
@@ -51,6 +57,18 @@ export type RateLimitResult = {
   remaining: number
 }
 
+function refillBucket(bucket: Bucket, cfg: RateLimitConfig): void {
+  const now = nowMs()
+  const interval = cfg.refillIntervalMs ?? Math.max(1_000, Math.floor(cfg.windowMs / cfg.max))
+  const tokensPerInterval = Math.max(1, Math.ceil((cfg.max * interval) / cfg.windowMs))
+  const elapsed = Math.max(0, now - bucket.lastRefill)
+  const intervals = Math.floor(elapsed / interval)
+  if (intervals > 0) {
+    bucket.tokens = Math.min(cfg.max, bucket.tokens + intervals * tokensPerInterval)
+    bucket.lastRefill += intervals * interval
+  }
+}
+
 export function rateLimit(
   req: Request | { headers: Headers },
   scope: keyof typeof DEFAULT_CONFIGS | string,
@@ -67,16 +85,11 @@ export function rateLimit(
     STORE.set(key, bucket)
   }
 
-  const now = nowMs()
-  const elapsed = Math.max(0, now - bucket.lastRefill)
-  const interval = cfg.refillIntervalMs ?? cfg.windowMs
-  const refilled = Math.floor(elapsed / interval) * Math.max(1, Math.floor(cfg.max))
-  if (refilled > 0) {
-    bucket.tokens = Math.min(cfg.max, bucket.tokens + refilled)
-    bucket.lastRefill = now
-  }
+  refillBucket(bucket, cfg)
 
   if (bucket.tokens <= 0) {
+    const interval = cfg.refillIntervalMs ?? Math.max(1_000, Math.floor(cfg.windowMs / cfg.max))
+    const elapsed = nowMs() - bucket.lastRefill
     const retryAfterMs = Math.max(0, interval - elapsed)
     log.warn(
       'RATE_LIMIT',
@@ -102,37 +115,40 @@ export function rateLimit(
   }
 }
 
-const cfg_max_fail_tokens = 20
-
-/** Rate-Limit Wrapper, der zusätzlich bei Login nach falschem Passwort verlangsamt. */
 export function loginThrottle(
   req: Request | { headers: Headers },
   emailKey: string,
-): { waitMs: number; blocked: boolean } {
+): { waitMs: number; blocked: boolean; ipRemaining: number; failRemaining: number } {
   const ipRes = rateLimit(req, 'login')
-  if (!ipRes.ok) return { waitMs: ipRes.retryAfterMs, blocked: true }
+  if (!ipRes.ok) return { waitMs: ipRes.retryAfterMs, blocked: true, ipRemaining: 0, failRemaining: 0 }
 
-  const key = `login-fail:${emailKey.toLowerCase()}`
-  const ex = STORE.get(key)
-  if (!ex) {
-    STORE.set(key, { tokens: cfg_max_fail_tokens, lastRefill: nowMs() })
-    return { waitMs: 0, blocked: false }
+  const emailNorm = emailKey.toLowerCase()
+  const failKey = `login-fail:${emailNorm}`
+  let bucket = STORE.get(failKey)
+  if (!bucket) {
+    bucket = { tokens: LOGIN_FAIL_CONFIG.max, lastRefill: nowMs() }
+    STORE.set(failKey, bucket)
   }
-  const fails = Math.max(0, cfg_max_fail_tokens - ex.tokens)
+  refillBucket(bucket, LOGIN_FAIL_CONFIG)
+
+  const fails = Math.max(0, LOGIN_FAIL_CONFIG.max - bucket.tokens)
   const waitMs = fails < 3 ? 0 : Math.min(3_000, (fails - 2) * 500)
-  return { waitMs, blocked: false }
+
+  return { waitMs, blocked: false, ipRemaining: ipRes.remaining, failRemaining: bucket.tokens }
 }
 
 export function recordLoginFailure(emailKey: string) {
-  const key = `login-fail:${emailKey.toLowerCase()}`
+  const emailNorm = emailKey.toLowerCase()
+  const key = `login-fail:${emailNorm}`
   const cur = STORE.get(key)
   STORE.set(key, {
-    tokens: Math.max(0, (cur?.tokens ?? cfg_max_fail_tokens) - 1),
-    lastRefill: nowMs(),
+    tokens: Math.max(0, (cur?.tokens ?? LOGIN_FAIL_CONFIG.max) - 1),
+    lastRefill: cur?.lastRefill ?? nowMs(),
   })
 }
 
 export function recordLoginSuccess(emailKey: string) {
-  const key = `login-fail:${emailKey.toLowerCase()}`
+  const emailNorm = emailKey.toLowerCase()
+  const key = `login-fail:${emailNorm}`
   STORE.delete(key)
 }

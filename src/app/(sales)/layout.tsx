@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { getCurrentUser } from '@/lib/auth'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { getUserWallet } from '@/lib/auth'
+import { getMaintenanceMode } from '@/lib/services/system.service'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,6 +15,18 @@ export default async function SalesLayout({
   if (!user) redirect('/login')
   if (user.role !== 'seller' && user.role !== 'admin') redirect('/login')
   if (!user.is_active) redirect('/login?error=inactive')
+
+  if (user.role !== 'admin') {
+    try {
+      const mm = await getMaintenanceMode()
+      if (mm.enabled) {
+        const params = new URLSearchParams()
+        params.set('maintenance', '1')
+        params.set('m', mm.message || 'Wartungsarbeiten. Bitte versuche es später erneut.')
+        redirect('/login?' + params.toString())
+      }
+    } catch {}
+  }
 
   const wallet = user.role === 'seller' ? await getUserWallet(user.id) : null
   const email = (user as any).auth_email ?? user.id.slice(0, 8) + '@…'
