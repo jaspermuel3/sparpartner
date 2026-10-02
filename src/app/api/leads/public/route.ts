@@ -36,7 +36,10 @@ type PublicLeadPayload = {
   utm_content?: string | null
 }
 
-const PROD_ALLOWED_ORIGINS = [/^https?:\/\/(.*\.)?sparpartner24\.de$/]
+const PROD_ALLOWED_ORIGINS = [
+  /^https?:\/\/(.*\.)?sparpartner24\.de$/,
+  /^https?:\/\/[a-z0-9-]+\.vercel\.app$/,
+]
 const DEV_ALLOWED_ORIGINS = [
   /^http:\/\/localhost(:\d+)?$/,
   /^http:\/\/127\.0\.0\.1(:\d+)?$/,
@@ -131,20 +134,16 @@ export async function POST(req: Request) {
       req.headers.get('x-api-key') ?? req.headers.get('X-API-KEY'),
     )
 
-    let landingKey: string
+    let landingKey: string | null = null
     try {
       landingKey = getLandingApiKey()
     } catch (envErr: unknown) {
-      log.error('PUBLIC_LEADS', 'LANDING_API_KEY Konfiguration unvollständig', undefined, envErr)
-      return jsonWithCors(
-        req,
-        { error: 'SERVER_MISCONFIGURED' },
-        { status: 500, headers: rlHeaders },
-      )
+      log.error('PUBLIC_LEADS', 'LANDING_API_KEY Konfiguration unvollständig – allow fallback (try DB lookup)', undefined, envErr)
+      landingKey = null
     }
 
-    const keyMatch = apiKeyFromHeader
-      ? await timingSafeEqual(apiKeyFromHeader, landingKey)
+    const keyMatch = landingKey && apiKeyFromHeader
+      ? await timingSafeEqual(apiKeyFromHeader, landingKey as string)
       : false
     if (!keyMatch) {
       log.warn('PUBLIC_LEADS', 'API-Key Abgelehnt', {
