@@ -1,6 +1,7 @@
 import { createClient } from './supabase/server'
 import { createAdminClient } from './supabase/admin'
 import { getTokenWallet } from './services/tokens.service'
+import { getMaintenanceMode } from './services/system.service'
 import type { DatabaseUser, UserRole } from '@/types'
 
 export const getUserWallet = getTokenWallet
@@ -30,6 +31,16 @@ export async function requireUser() {
   const user = await getCurrentUser()
   if (!user) throw new Error('UNAUTHENTICATED')
   if (!user.is_active) throw new Error('USER_INACTIVE')
+  if (user.role !== 'admin') {
+    try {
+      const mm = await getMaintenanceMode()
+      if (mm.enabled) {
+        throw new Error('MAINTENANCE_MODE:' + mm.message)
+      }
+    } catch (e: any) {
+      if (String(e?.message ?? '').startsWith('MAINTENANCE_MODE:')) throw e
+    }
+  }
   return user
 }
 

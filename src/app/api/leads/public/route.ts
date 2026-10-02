@@ -11,6 +11,7 @@ import {
   isValidZip,
   stripBomWs,
 } from '@/lib/validation'
+import { getLandingApiEnabled } from '@/lib/services/system.service'
 import type { ProductType } from '@/types'
 
 export const runtime = 'nodejs'
@@ -116,6 +117,16 @@ export async function POST(req: Request) {
   }
 
   try {
+    const apiEnabled = await getLandingApiEnabled()
+    if (!apiEnabled) {
+      log.warn('PUBLIC_LEADS', 'Landing API per Setting deaktiviert – 503')
+      return jsonWithCors(
+        req,
+        { error: 'SERVICE_UNAVAILABLE', message: 'Lead-Annahme derzeit deaktiviert.' },
+        { status: 503, headers: rlHeaders },
+      )
+    }
+
     const apiKeyFromHeader = stripBomWs(
       req.headers.get('x-api-key') ?? req.headers.get('X-API-KEY'),
     )

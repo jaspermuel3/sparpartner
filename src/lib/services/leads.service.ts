@@ -2,6 +2,7 @@ import { createAdminClient } from '../supabase/admin'
 import type { Lead, LeadStatus, UserRole, DatabaseUser, LeadWithDetails, ProductType, WaitlistEntry, TimeHeatmapCell } from '@/types'
 import { logAudit } from '../audit'
 import { getUserEmailMap } from '../user-emails'
+import { log, tryLog } from '../logging'
 
 export const TOKEN_COST_PER_LEAD = 1
 
@@ -102,13 +103,15 @@ export async function getLeadWithDetails(leadId: string, viewerId: string, viewe
 
   if (viewerRole !== 'admin') {
     query = query.eq('assigned_user_id', viewerId) as typeof query
+    query = query.eq('archived', false) as typeof query
   }
 
   let data: any = null
   try {
     const res = await query.maybeSingle()
     data = res.data
-  } catch {
+  } catch (e) {
+    log.warn('LEADS', 'getLeadWithDetails primary query fehlgeschlagen (Fallback aktiv)', undefined, e)
   }
 
   if (!data) {
@@ -126,14 +129,13 @@ export async function getLeadWithDetails(leadId: string, viewerId: string, viewe
       .eq('id', leadId)
       .eq('is_deleted', false)
       .limit(1)
+    let fallbackFiltered: typeof fallbackQuery = fallbackQuery
     if (viewerRole !== 'admin') {
-      const fallbackQueryTyped = fallbackQuery.eq('assigned_user_id', viewerId)
-      const fr = await fallbackQueryTyped.maybeSingle()
-      data = fr.data
-    } else {
-      const fr = await fallbackQuery.maybeSingle()
-      data = fr.data
+      const withUser = fallbackQuery.eq('assigned_user_id', viewerId)
+      fallbackFiltered = withUser.eq('archived', false) as typeof fallbackQuery
     }
+    const fr = await fallbackFiltered.maybeSingle()
+    data = fr.data
     if (data) {
       if (data.assigned_user_id) {
         const { data: usr } = await admin
@@ -259,6 +261,7 @@ export async function getMyLeads(
     .select('*', { count: 'exact' })
     .eq('assigned_user_id', userId)
     .eq('is_deleted', false)
+    .eq('archived', false)
 
   if (params.statuses && params.statuses.length > 0) {
     query = query.in('status', params.statuses) as typeof query
@@ -426,15 +429,15 @@ export async function getSellerDashboardStats(userId: string) {
     yesterdayLeadsToday,
   ] = await Promise.all([
     admin.from('token_wallets').select('balance').eq('user_id', userId).maybeSingle(),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).eq('is_deleted', false),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).gte('updated_at', todayISO).eq('is_deleted', false),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).eq('status', 'closed').eq('is_deleted', false),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).in('status', ['no_interest', 'wrong_data', 'canceled']).eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).eq('is_deleted', false).eq('archived', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).gte('updated_at', todayISO).eq('is_deleted', false).eq('archived', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).eq('status', 'closed').eq('is_deleted', false).eq('archived', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).in('status', ['no_interest', 'wrong_data', 'canceled']).eq('is_deleted', false).eq('archived', false),
     admin.from('callbacks').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'offen'),
     admin.from('callbacks').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('status', 'offen').lt('callback_at', new Date().toISOString()),
     admin.from('lead_status_history').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('new_status', 'closed').gte('created_at', yesterdayISO).lt('created_at', todayISO),
     admin.from('lead_status_history').select('id', { count: 'exact', head: true }).eq('user_id', userId).in('new_status', ['no_interest', 'wrong_data', 'canceled']).gte('created_at', yesterdayISO).lt('created_at', todayISO),
-    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).gte('updated_at', yesterdayISO).lt('updated_at', todayISO).eq('is_deleted', false),
+    admin.from('leads').select('id', { count: 'exact', head: true }).eq('assigned_user_id', userId).gte('updated_at', yesterdayISO).lt('updated_at', todayISO).eq('is_deleted', false).eq('archived', false),
   ])
 
   const abschlüsse = closedRes.count ?? 0
@@ -457,7 +460,8 @@ export async function getSellerDashboardStats(userId: string) {
       const { data, error } = await finalQ
       if (error || !data) return 0
       return data.reduce((s: number, r: any) => s + (Number(r.call_duration_seconds) || 0), 0)
-    } catch {
+    } catch (e) {
+      log.warn('LEADS', 'Summe der Gesprächsdauer konnte nicht berechnet werden', undefined, e)
       return 0
     }
   }
@@ -514,7 +518,8 @@ export async function getRecentActivity(userId: string, limit = 10) {
         .limit(limit)
       attempts = (fall.data ?? []) as any[]
     }
-  } catch {
+  } catch (e1: any) {
+    log.warn('LEADS', 'Kontaktaktivitäten (erster Versuch) fehlgeschlagen', undefined, e1)
     try {
       const fall = await admin
         .from('contact_attempts')
@@ -523,7 +528,8 @@ export async function getRecentActivity(userId: string, limit = 10) {
         .order('attempt_date', { ascending: false })
         .limit(limit)
       attempts = (fall.data ?? []) as any[]
-    } catch {
+    } catch (e2) {
+      log.error('LEADS', 'Kontaktaktivitäten (Fallback) fehlgeschlagen', undefined, e2)
       attempts = []
     }
   }
@@ -595,6 +601,7 @@ export async function getWorklist(userId: string, limit = 10): Promise<WorklistI
       .eq('assigned_user_id', userId)
       .eq('status', 'assigned')
       .eq('is_deleted', false)
+      .eq('archived', false)
       .order('created_at', { ascending: true })
       .limit(Math.ceil(limit / 2))
       .then((r) => r.data ?? []),
@@ -604,6 +611,7 @@ export async function getWorklist(userId: string, limit = 10): Promise<WorklistI
       .eq('assigned_user_id', userId)
       .eq('status', 'contacted')
       .eq('is_deleted', false)
+      .eq('archived', false)
       .lte('updated_at', staleAfter)
       .order('updated_at', { ascending: true })
       .limit(Math.ceil(limit / 3))
@@ -677,7 +685,9 @@ export async function getContactTimeHeatmap(userId: string, days = 56): Promise<
     if (!rpcRes?.error && Array.isArray(rpcRes?.data) && rpcRes.data.length > 0) {
       return rpcRes.data as TimeHeatmapCell[]
     }
-  } catch {}
+  } catch (e) {
+    log.warn('LEADS', 'get_contact_time_heatmap RPC fehlgeschlagen – leeres Array geliefert', undefined, e)
+  }
   return [] as TimeHeatmapCell[]
 }
 
@@ -687,6 +697,7 @@ export async function getAvailableLeadCount(product?: ProductType | null): Promi
     .from('leads')
     .select('id', { count: 'exact', head: true })
     .eq('is_deleted', false)
+    .eq('archived', false)
     .eq('is_on_hold', false)
     .is('assigned_user_id', null)
     .not('status', 'in', '("canceled","wrong_data","no_interest","closed")')
@@ -711,6 +722,7 @@ export async function getAvailableLeadCountBreakdown(): Promise<{
     .from('leads')
     .select('id, product', { count: 'exact' })
     .eq('is_deleted', false)
+    .eq('archived', false)
     .eq('is_on_hold', false)
     .is('assigned_user_id', null)
     .not('status', 'in', '("canceled","wrong_data","no_interest","closed")')

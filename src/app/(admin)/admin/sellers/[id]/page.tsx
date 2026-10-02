@@ -6,7 +6,9 @@ import {
   getAuditLogsForUser,
 } from '@/lib/services/admin.service'
 import { getAllTeams } from '@/lib/services/teams.service'
+import { getUserEmailMap, withEmail } from '@/lib/user-emails'
 import { SellerDetailClient } from './SellerDetailClient'
+import { notFound } from 'next/navigation'
 
 export const metadata = { title: 'Verkäufer · Admin' }
 
@@ -28,13 +30,22 @@ function getMonthlyTargetsMock(perf: any) {
 export default async function AdminSellerDetailPage({
   params,
 }: {
-  params: { id: string }
+  params: Promise<{ id: string }> | { id: string }
 }) {
   await requireAdmin()
-  const admin = createAdminClient()
-  const userId = params.id
 
-  const [{ data: sellerRaw }, teams, wallet, perf, leads, audits] = await Promise.all([
+  const resolvedParams = (params as any)?.then
+    ? await (params as Promise<{ id: string }>)
+    : (params as { id: string })
+
+  const userId = resolvedParams?.id
+  if (!userId || typeof userId !== 'string' || userId.length < 5) {
+    notFound()
+  }
+
+  const admin = createAdminClient()
+
+  const [sellerRes, teams, walletRes, perf, leads, audits] = await Promise.all([
     admin
       .from('users')
       .select(`
@@ -42,7 +53,7 @@ export default async function AdminSellerDetailPage({
         team:teams(id, name, color)
       `)
       .eq('id', userId)
-      .single(),
+      .maybeSingle(),
     getAllTeams() as Promise<any[]>,
     admin
       .from('token_wallets')
@@ -55,9 +66,17 @@ export default async function AdminSellerDetailPage({
     getAuditLogsForUser(userId, 200),
   ] as any)
 
+  const sellerRaw = (sellerRes as any)?.data ?? null
+  if (!sellerRaw) {
+    notFound()
+  }
+
+  const emailMap = await getUserEmailMap([userId])
+  const sellerWithEmail = withEmail(sellerRaw as any, emailMap)
+
   const seller = {
-    ...(sellerRaw as any),
-    wallet: (wallet as any)?.data ?? null,
+    ...sellerWithEmail,
+    wallet: (walletRes as any)?.data ?? null,
   }
   const targets = getMonthlyTargetsMock(perf)
 

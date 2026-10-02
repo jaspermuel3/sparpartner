@@ -1,7 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
-import { getSupabaseUrl, getSupabaseAnonKey, stripBomAndWs } from '@/lib/supabase/_sanitize'
+import { getSupabaseUrl, getSupabaseAnonKey } from '@/lib/supabase/_sanitize'
+import { log, tryLog } from '@/lib/logging'
+import {
+  rateLimit,
+  loginThrottle,
+  recordLoginFailure,
+  recordLoginSuccess,
+} from '@/lib/rate-limit'
+import { validatePasswordPolicy, isValidEmail } from '@/lib/validation'
+import { isProd } from '@/lib/env'
 
 function copyCookies(from: NextResponse, to: NextResponse) {
   for (const c of from.cookies.getAll()) {
@@ -10,35 +19,86 @@ function copyCookies(from: NextResponse, to: NextResponse) {
   return to
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+function applyRateLimitHeaders(init: ResponseInit, result: { limit: number; remaining: number }): ResponseInit {
+  const h = new Headers(init.headers ?? {})
+  h.set('X-RateLimit-Limit', String(result.limit))
+  h.set('X-RateLimit-Remaining', String(result.remaining))
+  return { ...init, headers: h }
+}
+
 export async function POST(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } })
   const loginRedirect = request.nextUrl.clone()
   loginRedirect.pathname = '/login'
 
-  try {
-    const formData = await request.formData().catch(() => null)
+  // ---------- Rate-Limit (IP-basiert) ----------
+  const ipLimit = rateLimit(request, 'login')
+  if (!ipLimit.ok) {
+    const secs = Math.max(1, Math.ceil(ipLimit.retryAfterMs / 1000))
+    loginRedirect.searchParams.set('error', 'ZU_VIELE_VERSUCHE')
+    loginRedirect.searchParams.set('retry_after', String(secs))
+    const res = NextResponse.redirect(loginRedirect, { status: 303 })
+    res.headers.set('Retry-After', String(secs))
+    return copyCookies(response, res)
+  }
 
-    if (!formData) {
-      loginRedirect.searchParams.set('next', '/dashboard')
-      loginRedirect.searchParams.set('error', 'Ungültige Anfrage.')
+  const formData = await request.formData().catch(() => null)
+  if (!formData) {
+    loginRedirect.searchParams.set('next', '/dashboard')
+    loginRedirect.searchParams.set('error', 'Ungültige Anfrage.')
+    return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
+  }
+
+  const emailRaw = String(formData.get('email') ?? '').trim()
+  const email = emailRaw.toLowerCase()
+  const password = String(formData.get('password') ?? '')
+  const nextRaw = String(formData.get('next') ?? '/dashboard') || '/dashboard'
+  const next = nextRaw.startsWith('/') ? nextRaw : '/dashboard'
+
+  loginRedirect.searchParams.set('next', next)
+
+  // ---------- Throttle je E-Mail (verzögert bei bekannten Fehlversuchen) ----------
+  const throttle = loginThrottle(request, email || 'unknown-email')
+  if (throttle.blocked) {
+    loginRedirect.searchParams.set('error', 'ZU_VIELE_VERSUCHE')
+    const res = NextResponse.redirect(loginRedirect, { status: 303 })
+    res.headers.set('Retry-After', String(Math.max(1, Math.ceil(throttle.waitMs / 1000))))
+    return copyCookies(response, res)
+  }
+  if (throttle.waitMs > 0) {
+    await sleep(throttle.waitMs)
+  }
+
+  try {
+    if (!email || !password) {
+      if (email) recordLoginFailure(email)
+      loginRedirect.searchParams.set('error', 'Bitte E-Mail und Passwort eingeben.')
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
 
-    const email = String(formData.get('email') ?? '').trim()
-    const password = stripBomAndWs(String(formData.get('password') ?? ''))
-    const nextRaw = String(formData.get('next') ?? '/dashboard') || '/dashboard'
-    const next = nextRaw.startsWith('/') ? nextRaw : '/dashboard'
+    if (!isValidEmail(email)) {
+      recordLoginFailure(email)
+      loginRedirect.searchParams.set('error', 'Ungültige E-Mail-Adresse.')
+      return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
+    }
 
-    loginRedirect.searchParams.set('next', next)
-
-    if (!email || !password) {
-      loginRedirect.searchParams.set('error', 'Bitte E-Mail und Passwort eingeben.')
+    // Hinweis: Keinen Fehler wegen zu kurzem Passwort VOR dem Auth-Check zurückgeben,
+    // sonst lässt sich die Länge gültiger Passwörter raten. Stattdessen validieren wir
+    // NUR auf zu lang (max 128 Zeichen) – OWASP-Guideline.
+    if (password.length > 128) {
+      recordLoginFailure(email)
+      loginRedirect.searchParams.set('error', 'E-Mail oder Passwort ist falsch.')
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
 
     if (!getSupabaseUrl() || !getSupabaseAnonKey()) {
       loginRedirect.searchParams.set('error', 'Server-Konfiguration unvollständig. Supabase-URL oder Anon-Key fehlen.')
-      return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
+      const errInit = applyRateLimitHeaders({ status: 303 }, ipLimit)
+      return copyCookies(response, NextResponse.redirect(loginRedirect, errInit))
     }
 
     const admin = createAdminClient()
@@ -48,14 +108,20 @@ export async function POST(request: NextRequest) {
       getSupabaseAnonKey(),
       {
         cookies: {
-          get(name: string) {
-            return request.cookies.get(name)?.value
-          },
+          get(name: string) { return request.cookies.get(name)?.value },
           set(name: string, value: string, options: CookieOptions) {
             try { response.cookies.set({ name, value, ...options }) } catch {}
           },
           remove(name: string, options: CookieOptions) {
-            try { response.cookies.set({ name, value: '', ...options, maxAge: 0, expires: new Date(0) }) } catch {}
+            try {
+              response.cookies.set({
+                name,
+                value: '',
+                ...options,
+                maxAge: 0,
+                expires: new Date(0),
+              })
+            } catch {}
           },
         },
       },
@@ -67,6 +133,13 @@ export async function POST(request: NextRequest) {
     })
 
     if (signInError || !signInData?.session) {
+      recordLoginFailure(email)
+      log.warn(
+        'AUTH',
+        'Login fehlgeschlagen',
+        { email },
+        signInError,
+      )
       const msg =
         signInError?.message?.toLowerCase().includes('invalid') ||
         signInError?.message?.toLowerCase().includes('credentials')
@@ -82,156 +155,163 @@ export async function POST(request: NextRequest) {
     })
 
     if (setSessionErr) {
+      recordLoginFailure(email)
+      log.warn('AUTH', 'Session konnte nach signIn nicht gespeichert werden', undefined, setSessionErr)
       loginRedirect.searchParams.set('error', 'Sitzung konnte nicht gespeichert werden.')
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
 
     const { data: { user: authUser }, error: getUserErr } = await supabase.auth.getUser()
     if (getUserErr || !authUser) {
+      recordLoginFailure(email)
       loginRedirect.searchParams.set('error', 'Benutzer konnte nicht ausgelesen werden.')
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
 
-    let { data: dbUser } = await admin
+    type DbUserRow = {
+      id: string
+      role: 'seller' | 'admin' | string
+      is_active: boolean
+      last_login_at: string | null
+      full_name: string | null
+    }
+
+    let dbUser: DbUserRow | null = null
+
+    const dbRes = await admin
       .from('users')
       .select('id, role, is_active, last_login_at, full_name')
       .eq('id', authUser.id)
       .limit(1)
       .maybeSingle()
+    dbUser = (dbRes.data ?? null) as DbUserRow | null
 
     if (!dbUser) {
+      // Fallback: Benutzer in der lokalen users-Tabelle anlegen (Synchronisation mit auth.users)
       const fallbackRole =
         (authUser.email ?? '').toLowerCase().includes('admin') ? 'admin' : 'seller'
       const fallbackFullName =
-        (authUser.user_metadata?.full_name as string) ||
-        (authUser.user_metadata?.name as string) ||
+        (authUser.user_metadata?.full_name as string | undefined) ||
+        (authUser.user_metadata?.name as string | undefined) ||
         (authUser.email ? authUser.email.split('@')[0] : 'Benutzer')
 
+      let inserted = false
       try {
-        // Versuch 1: Direktes Insert via Supabase JS
-        let inserted = false
+        const created = await admin
+          .from('users')
+          .insert({
+            id: authUser.id,
+            full_name: fallbackFullName,
+            role: fallbackRole as unknown as 'seller',
+            is_active: true,
+          })
+          .select('id, role, is_active, last_login_at, full_name')
+          .limit(1)
+          .maybeSingle()
+        if (!created.error && created.data) {
+          dbUser = created.data as DbUserRow
+          inserted = true
+        }
+      } catch (e) { log.warn('AUTH', 'Direkter User-Insert fehlgeschlagen, versuche RPC', undefined, e) }
+
+      if (!inserted) {
         try {
-          const { data: created, error: createErr } = await admin
-            .from('users')
-            .insert({
-              id: authUser.id,
-              full_name: fallbackFullName,
-              role: fallbackRole as any,
-              is_active: true,
+          const rpc = await admin
+            .rpc('ensure_public_user_exists', {
+              p_auth_id: authUser.id,
+              p_fallback_name: fallbackFullName,
+              p_fallback_role: fallbackRole,
             })
-            .select('id, role, is_active, last_login_at, full_name')
             .limit(1)
             .maybeSingle()
+          if (rpc && rpc.data) dbUser = rpc.data as DbUserRow
+        } catch (e) { log.warn('AUTH', 'ensure_public_user_exists RPC fehlgeschlagen', undefined, e) }
+      }
 
-          if (!createErr && created) {
-            dbUser = created
-            inserted = true
-          }
-        } catch {}
-
-        // Versuch 2: Enum-safe via RPC public.ensure_public_user_exists(...)
-        // (definiert in Migration 0016)
-        if (!inserted) {
-          try {
-            const rpc: any = await admin
-              .rpc('ensure_public_user_exists', {
-                p_auth_id: authUser.id,
-                p_fallback_name: fallbackFullName,
-                p_fallback_role: fallbackRole,
-              })
-              .limit(1)
-              .maybeSingle()
-
-            if (rpc && rpc.data) dbUser = rpc.data as any
-          } catch {}
-        }
-
-        // Versuch 3: Fallback Query – falls Reparatur-Skript parallel schon lief
-        if (!dbUser) {
-          try {
-            const { data: retry } = await admin
-              .from('users')
-              .select('id, role, is_active, last_login_at, full_name')
-              .eq('id', authUser.id)
-              .limit(1)
-              .maybeSingle()
-            if (retry) dbUser = retry
-          } catch {}
-        }
-
+      if (!dbUser) {
         try {
-          // Typ-Sicher: reines INSERT im try/catch.
-          // Falls für user_id bereits ein Wallet existiert → Unique-Constraint-Error
-          // wird von catch {} abgefangen und ignoriert.
-          // (Verhält sich identisch zu alter Variante mit .onConflict + .ignore(),
-          //  umgeht aber den TS2339 Build-Fehler "Property 'onConflict' does not
-          //  exist on type PostgrestFilterBuilder" bei Supabase JS v2 + strengen
-          //  generierten DB-Typen)
-          await admin
-            .from('token_wallets')
-            .insert({ user_id: authUser.id, balance: fallbackRole === 'admin' ? 100 : 0 })
+          const retry = await admin
+            .from('users')
+            .select('id, role, is_active, last_login_at, full_name')
+            .eq('id', authUser.id)
+            .limit(1)
+            .maybeSingle()
+          if (retry.data) dbUser = retry.data as DbUserRow
         } catch {}
-      } catch {}
+      }
+
+      await tryLog('AUTH', undefined, async () => {
+        await admin
+          .from('token_wallets')
+          .insert({ user_id: authUser.id, balance: fallbackRole === 'admin' ? 100 : 0 })
+        return undefined
+      }, 'token_wallets Insert (Duplicate wird ignoriert)')
     }
 
     if (!dbUser) {
-      await supabase.auth.signOut()
+      await tryLog('AUTH', undefined, () => supabase.auth.signOut(), 'signOut nach fehlender User-Zuordnung')
+      recordLoginFailure(email)
       loginRedirect.searchParams.set('error', 'Benutzerprofil nicht gefunden.')
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
 
     if (!dbUser.is_active) {
-      await supabase.auth.signOut()
+      await tryLog('AUTH', undefined, () => supabase.auth.signOut(), 'signOut bei inactive User')
+      recordLoginFailure(email)
       loginRedirect.searchParams.set('error', 'inactive')
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
 
     if (dbUser.last_login_at) {
+      const cookiePayload = JSON.stringify({
+        at: dbUser.last_login_at,
+        email: authUser.email ?? null,
+        full_name: dbUser.full_name ?? null,
+      })
       try {
-        const cookiePayload = JSON.stringify({
-          at: dbUser.last_login_at,
-          email: authUser.email ?? null,
-          full_name: dbUser.full_name ?? null,
-        })
         response.cookies.set({
           name: 'crm:last_login_context',
           value: encodeURIComponent(cookiePayload),
           path: '/',
-          httpOnly: false,
+          httpOnly: true,
+          secure: isProd(),
           sameSite: 'lax',
           maxAge: 60,
         })
       } catch {}
     }
 
-    try {
+    await tryLog('AUTH', undefined, async () => {
       await admin
         .from('users')
         .update({ last_login_at: new Date().toISOString() })
         .eq('id', authUser.id)
-    } catch {}
+      return undefined
+    }, 'last_login_at update')
+
+    recordLoginSuccess(email)
+    log.info('AUTH', 'Login erfolgreich', {
+      user_id: authUser.id,
+      role: dbUser.role,
+      email,
+    })
 
     let safeNext = next
     const isAdmin = dbUser.role === 'admin'
     const isSellerOrAdmin = dbUser.role === 'seller' || isAdmin
 
-    if (safeNext.startsWith('/admin') && !isAdmin) {
-      safeNext = '/dashboard'
-    }
+    if (safeNext.startsWith('/admin') && !isAdmin) safeNext = '/dashboard'
     const salesPrefixes = ['/dashboard', '/request-lead', '/my-leads', '/callbacks', '/stats', '/settings']
     const isSales = salesPrefixes.some((p) => safeNext.startsWith(p)) || safeNext.startsWith('/admin/')
-    if (isSales && !isSellerOrAdmin) {
-      safeNext = '/login'
-    }
-    if (isAdmin && (safeNext === '/dashboard' || safeNext === '/')) {
-      safeNext = '/admin/dashboard'
-    }
+    if (isSales && !isSellerOrAdmin) safeNext = '/login'
+    if (isAdmin && (safeNext === '/dashboard' || safeNext === '/')) safeNext = '/admin/dashboard'
 
     const redirectUrl = request.nextUrl.clone()
     redirectUrl.pathname = safeNext
     return copyCookies(response, NextResponse.redirect(redirectUrl, { status: 303 }))
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    log.error('AUTH', 'Unbehandelte Exception im Login-Flow', { email }, err)
     loginRedirect.searchParams.set('error', msg)
     return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
   }

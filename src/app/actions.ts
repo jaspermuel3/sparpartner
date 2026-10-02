@@ -5,6 +5,9 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireUser, requireAdmin, requireSeller } from '@/lib/auth'
+import { runLoginFlow } from '@/lib/auth-login'
+import { validateLeadField, validatePasswordPolicy } from '@/lib/validation'
+import { log, tryLog } from '@/lib/logging'
 import {
   requestLead,
   updateLeadStatus as svcUpdateLeadStatus,
@@ -90,10 +93,22 @@ const mapError = (err: unknown): { error: string } => {
     LAST_ADMIN_PROTECTED: 'Dies ist der letzte aktive Admin – Mindestens ein Admin muss aktiv bleiben.',
     CANNOT_DELETE_SELF: 'Du kannst dich nicht selbst löschen oder deaktivieren.',
     INVALID_EMAIL: 'Ungültige E-Mail-Adresse.',
+    FULLNAME_INVALID: 'Name muss mindestens 2 Zeichen lang sein.',
     EMAIL_ALREADY_EXISTS: 'Diese E-Mail wird bereits verwendet.',
     USER_EMAIL_NOT_FOUND: 'Benutzer hat keine hinterlegte E-Mail.',
+    inactive: 'Dein Account ist deaktiviert. Bitte kontaktiere den Administrator.',
+    ZU_VIELE_VERSUCHE: 'Zu viele fehlgeschlagene Versuche. Bitte warte ein paar Minuten.',
   }
-  return { error: map[msg] ?? msg }
+  const base = map[msg]
+  if (base) return { error: base }
+  if (msg.startsWith('MAINTENANCE_MODE:')) {
+    const info = msg.replace('MAINTENANCE_MODE:', '').trim() || 'Wartungsarbeiten.'
+    return { error: 'Wartungsmodus aktiv: ' + info }
+  }
+  if (msg.startsWith('PASSWORT_SCHWACH:')) {
+    return { error: msg.replace('PASSWORT_SCHWACH:', 'Passwort zu schwach:').trim() }
+  }
+  return { error: msg }
 }
 
 export async function loginAction(formData: FormData) {
@@ -102,48 +117,21 @@ export async function loginAction(formData: FormData) {
   const next = String(formData.get('next') ?? '/dashboard')
 
   try {
-    const supabase = createClient()
-    const { data: signInData, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {
-      return { error: 'E-Mail oder Passwort ist falsch.' }
+    const res = await runLoginFlow({
+      email,
+      password,
+      next,
+      createSupabase: createClient,
+      validateBeforeSignIn: false,
+    })
+    if (!res.ok || !res.user || !res.nextOverride) {
+      return { error: res.error?.message ?? 'Anmeldung fehlgeschlagen.' }
     }
-
-    // WICHTIG! Bei @supabase/ssr muss die Session explizit via setSession()
-    // persistiert werden, damit der Cookie-Adapter die Auth-Cookies schreibt.
-    if (signInData?.session) {
-      const { error: setErr } = await supabase.auth.setSession({
-        access_token: signInData.session.access_token,
-        refresh_token: signInData.session.refresh_token,
-      })
-      if (setErr) {
-        return { error: 'Sitzung konnte nicht gespeichert werden: ' + setErr.message }
-      }
-    }
-
     const admin = createAdminClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { error: 'Benutzer nicht gefunden.' }
-
-    const { data: dbUser } = await admin
-      .from('users')
-      .select('is_active, role')
-      .eq('id', user.id)
-      .limit(1)
-      .maybeSingle()
-
-    if (!dbUser) {
-      await supabase.auth.signOut()
-      return { error: 'Benutzerprofil nicht gefunden.' }
-    }
-    if (!dbUser.is_active) {
-      await supabase.auth.signOut()
-      return { error: 'Dein Account ist deaktiviert. Bitte kontaktiere den Admin.' }
-    }
-
-    // KEIN redirect() hier! useFormState() fängt die NEX_REDIRECT Exception ab
-    // und verhindert so den Redirect. Stattdessen redirectTo zurückgeben
-    // und Client-seitig via useRouter() navigieren.
-    return { redirectTo: next }
+    await tryLog('AUTH', undefined, async () => {
+      await admin.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', res.user!.db_id)
+    }, 'last_login_at Update via loginAction')
+    return { redirectTo: res.nextOverride }
   } catch (err) {
     return mapError(err)
   }
@@ -153,8 +141,8 @@ export async function logoutAction(formData?: FormData) {
   const supabase = createClient()
   try {
     await supabase.auth.signOut()
-  } catch {
-    // noop – im Fehlerfall trotzdem weiterleiten
+  } catch (e) {
+    log.warn('AUTH', 'SignOut (logoutAction) fehlgeschlagen (swallowed, weiterleitung läuft)', undefined, e)
   }
   return { redirectTo: '/login' }
 }
@@ -168,15 +156,16 @@ export async function requestLeadAction(formData: FormData) {
     const lead = await requestLead(user.id, product)
     await logAudit(user.id, 'LEAD_ASSIGNED', 'lead', lead.id, { via: 'request_lead', product })
     await logAudit(user.id, 'TOKEN_DEBIT', 'token_wallet', null, { amount: -1, lead_id: lead.id })
-    await svcRemoveFromWaitlist(user.id).catch(() => {})
+    await tryLog('ACTIONS', undefined, () => svcRemoveFromWaitlist(user.id), 'svcRemoveFromWaitlist failed, swallowed')
     try {
       const leadName = [lead.first_name, lead.last_name].filter(Boolean).join(' ') || 'Unbekannt'
       await notifyLeadAssigned(user.id, lead.id, leadName)
-      // Prüfe Token-Guthaben nach Abzug
       const { getWalletBalance } = await import('@/lib/services/tokens.service')
       const bal = await getWalletBalance(user.id)
       await notifyTokenLow(user.id, bal)
-    } catch {}
+    } catch (e) {
+      log.warn('ACTIONS', 'Benachrichtigungen nach Lead-Zuweisung fehlgeschlagen', { lead_id: lead.id }, e)
+    }
     revalidatePath('/dashboard')
     revalidatePath('/my-leads')
     revalidatePath('/request-lead')
@@ -287,19 +276,32 @@ export async function updateLeadInlineAction(formData: FormData) {
     const allowedFields = ['first_name', 'last_name', 'phone', 'email', 'notes', 'street', 'zip', 'city']
     if (!allowedFields.includes(field)) return { error: 'Ungültiges Feld.' }
 
+    // ---------- Validierung (selbe Strenge wie Public-API) ----------
+    const check = validateLeadField(field, rawValue)
+    if (!check.ok) {
+      const firstErr = Object.values(check.errors ?? { _: 'Ungültige Eingabe.' })[0]
+      return { error: firstErr }
+    }
+    const normalized =
+      check.normalized === undefined
+        ? rawValue
+        : (check.normalized as unknown as string)
+
     await getLeadWithDetails(leadId, user.id, user.role)
     const admin = createAdminClient()
     const patch: any = {}
     if (field === 'phone' || field === 'email' || field === 'street' || field === 'city') {
-      patch[field] = rawValue || null
+      patch[field] = normalized === '' ? null : normalized
     } else if (field === 'zip') {
-      patch.zip = rawValue || null
+      patch.zip = normalized === '' ? null : normalized
+    } else if (field === 'notes') {
+      patch.notes = rawValue
     } else {
-      patch[field] = rawValue
+      patch[field] = normalized ?? rawValue
     }
     const { error } = await admin.from('leads').update(patch).eq('id', leadId)
     if (error) throw error
-    await logAudit(user.id, 'LEAD_UPDATED', 'lead', leadId, { field, value: rawValue })
+    await logAudit(user.id, 'LEAD_UPDATED', 'lead', leadId, { field, value: normalized ?? rawValue })
     revalidatePath(`/leads/${leadId}`)
     revalidatePath('/my-leads')
     revalidatePath('/admin/leads')
@@ -393,6 +395,15 @@ export async function createSellerAction(formData: FormData) {
     const role_raw = formData.get('role') ? String(formData.get('role')) : 'seller'
     const role = role_raw === 'admin' ? 'admin' : 'seller'
 
+    if (password !== undefined && password.length > 0) {
+      const pw = validatePasswordPolicy(password)
+      if (!pw.ok) {
+        return { error: 'PASSWORT_SCHWACH:' + pw.errors.join(' ') }
+      }
+    }
+    if (full_name.trim().length < 2) return { error: 'Name muss mindestens 2 Zeichen lang sein.' }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Ungültige E-Mail-Adresse.' }
+
     const res = await svcCreateSeller(
       { email, password, full_name, initial_balance: initial_balance_raw, role },
       adminUser.id,
@@ -457,6 +468,10 @@ export async function resetSellerPasswordAction(formData: FormData) {
     await requireAdmin()
     const userId = String(formData.get('userId'))
     const password = String(formData.get('password'))
+    const pw = validatePasswordPolicy(password)
+    if (!pw.ok) {
+      return { error: 'PASSWORT_SCHWACH:' + pw.errors.join(' ') }
+    }
     await svcResetSellerPassword(userId, password)
     return { ok: true }
   } catch (err) {
@@ -477,7 +492,9 @@ export async function addTokensToSellerAction(formData: FormData) {
       const bal = await getWalletBalance(userId)
       await notifyTokenCredit(userId, amount, bal, reason)
       await notifyTokenLow(userId, bal)
-    } catch {}
+    } catch (e) {
+      log.warn('ACTIONS', 'addTokensToSellerAction Benachrichtigungen fehlgeschlagen', { user_id: userId }, e)
+    }
     revalidatePath('/admin/sellers')
     revalidatePath('/admin/tokens')
     return { ok: true }
@@ -497,7 +514,9 @@ export async function subtractTokensFromSellerAction(formData: FormData) {
       const { getWalletBalance } = await import('@/lib/services/tokens.service')
       const bal = await getWalletBalance(userId)
       await notifyTokenLow(userId, bal)
-    } catch {}
+    } catch (e) {
+      log.warn('ACTIONS', 'subtractTokensFromSellerAction Benachrichtigungen fehlgeschlagen', { user_id: userId }, e)
+    }
     revalidatePath('/admin/sellers')
     revalidatePath('/admin/tokens')
     return { ok: true }
@@ -522,7 +541,9 @@ export async function adminAssignLeadAction(formData: FormData) {
       const { getWalletBalance } = await import('@/lib/services/tokens.service')
       const bal = await getWalletBalance(sellerId)
       await notifyTokenLow(sellerId, bal)
-    } catch {}
+    } catch (e) {
+      log.warn('ACTIONS', 'adminAssignLeadAction Benachrichtigungen fehlgeschlagen', { lead_id: leadId, seller_id: sellerId }, e)
+    }
     revalidatePath('/admin/leads')
     revalidatePath('/dashboard')
     return { ok: true }
@@ -555,6 +576,10 @@ export async function updateProfileAction(formData: FormData) {
     const password_new = String(formData.get('password_new') ?? '')
 
     if (password && password_new) {
+      const pwPolicy = validatePasswordPolicy(password_new)
+      if (!pwPolicy.ok) {
+        return { error: 'PASSWORT_SCHWACH:' + pwPolicy.errors.join(' ') }
+      }
       const { error: signInErr } = await supabase.auth.signInWithPassword({ email: (user as any).auth_email ?? email, password })
       if (signInErr) return { error: 'Aktuelles Passwort ist falsch.' }
       const { error: updateErr } = await supabase.auth.updateUser({ password: password_new })
@@ -805,7 +830,11 @@ export async function bulkCreditTokensAction(formData: FormData) {
     if (amount <= 0) return { error: 'Betrag muss größer 0 sein.' }
     const { creditTokens } = await import('@/lib/services/tokens.service')
     for (const id of ids) {
-      try { await creditTokens(id, amount, reason, adminUser.id, 'aufladung') } catch {}
+      try {
+        await creditTokens(id, amount, reason, adminUser.id, 'aufladung')
+      } catch (e) {
+        log.warn('ACTIONS', 'bulkCreditTokensAction: einzelner User fehlgeschlagen', { user_id: id }, e)
+      }
     }
     revalidatePath('/admin/sellers')
     revalidatePath('/admin/tokens')
@@ -1141,5 +1170,100 @@ export async function bulkDeactivateAction(formData: FormData) {
     return mapError(err)
   }
 }
+
+/* ============================================================
+   System Settings + Maintenance + Health Checks
+   ============================================================ */
+
+export async function toggleMaintenanceAction(_prev: any, formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const enable = formData.get('enable') === 'true' || formData.get('enable') === 'on'
+    const message = formData.get('message')
+      ? String(formData.get('message')).trim()
+      : undefined
+    const { setMaintenanceMode } = await import('@/lib/services/system.service')
+    await setMaintenanceMode(enable, message, adminUser.id)
+    revalidatePath('/admin/settings')
+    revalidatePath('/dashboard')
+    return {
+      ok: true,
+      toast: {
+        title: enable ? 'Wartungsmodus AKTIVIERT' : 'Wartungsmodus deaktiviert',
+        description: enable ? 'Nicht-Admin Benutzer werden ausgesperrt.' : 'Alle Benutzer haben wieder Zugriff.',
+        variant: enable ? ('default' as const) : ('success' as const),
+      },
+    }
+  } catch (err) { return mapError(err) }
+}
+
+export async function toggleLandingApiAction(_prev: any, formData: FormData) {
+  try {
+    const adminUser = await requireAdmin()
+    const enable = formData.get('enable') === 'true' || formData.get('enable') === 'on'
+    const { setLandingApiEnabled } = await import('@/lib/services/system.service')
+    await setLandingApiEnabled(enable, adminUser.id)
+    revalidatePath('/admin/settings')
+    return {
+      ok: true,
+      toast: {
+        title: enable ? 'Landing API AKTIVIERT' : 'Landing API DEAKTIVIERT',
+        description: enable ? 'Externe Leads werden wieder angenommen.' : 'Externe Lead-Annahmen werden abgewiesen.',
+        variant: 'success' as const,
+      },
+    }
+  } catch (err) { return mapError(err) }
+}
+
+export async function runHealthCheckAction() {
+  try {
+    await requireAdmin()
+    const { runHealthChecks } = await import('@/lib/services/system.service')
+    const status = await runHealthChecks()
+    return { ok: true as const, status }
+  } catch (err) { return { ok: false as const, ...mapError(err) } }
+}
+
+export async function getSystemSettingsAction() {
+  try {
+    await requireAdmin()
+    const { getAllSettings, getMaintenanceMode, getLandingApiEnabled } = await import(
+      '@/lib/services/system.service'
+    )
+    const [raw, maintenance, landing] = await Promise.all([
+      getAllSettings(),
+      getMaintenanceMode(),
+      getLandingApiEnabled(),
+    ])
+    return { ok: true as const, raw, maintenance, landing_api_enabled: landing }
+  } catch (err) { return { ok: false as const, ...mapError(err) } }
+}
+
+export async function clearAppCacheAction() {
+  try {
+    await requireAdmin()
+    const paths = [
+      '/admin/dashboard',
+      '/admin/leads',
+      '/admin/sellers',
+      '/admin/stats',
+      '/admin/tokens',
+      '/dashboard',
+      '/my-leads',
+      '/leads',
+      '/callbacks',
+    ]
+    for (const p of paths) revalidatePath(p)
+    return {
+      ok: true,
+      toast: {
+        title: 'Cache geleert',
+        description: `${paths.length} Pfade wurden revalidiert.`,
+        variant: 'success' as const,
+      },
+    }
+  } catch (err) { return mapError(err) }
+}
+
 
 

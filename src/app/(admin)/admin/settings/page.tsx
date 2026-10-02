@@ -8,6 +8,11 @@ import { DensitySelector } from '@/components/ui-custom/DensitySelectorClient'
 import { CreateTeamDialog } from '../sellers/AdminSellerDialogs'
 import { getAllTeams } from '@/lib/services/teams.service'
 import { User, ShieldCheck, Server, Users, Maximize2 } from 'lucide-react'
+import { AdminSystemPanelClient } from './AdminSystemPanelClient'
+import {
+  getMaintenanceMode,
+  getLandingApiEnabled,
+} from '@/lib/services/system.service'
 
 export const metadata = { title: 'Einstellungen · Admin' }
 
@@ -15,6 +20,10 @@ export default async function AdminSettingsPage() {
   const user = await requireAdmin()
   const email = (user as any).auth_email ?? ''
   const teams = await getAllTeams()
+  const [maintenance, landingApiEnabled] = await Promise.all([
+    getMaintenanceMode(),
+    getLandingApiEnabled(),
+  ])
 
   return (
     <div className="space-y-6">
@@ -152,6 +161,13 @@ export default async function AdminSettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <AdminSystemPanelClient
+        initialSettings={{
+          maintenance,
+          landing_api_enabled: landingApiEnabled,
+        }}
+      />
     </div>
   )
 }

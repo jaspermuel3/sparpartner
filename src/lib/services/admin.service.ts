@@ -2,12 +2,28 @@ import { createAdminClient } from '../supabase/admin'
 import { logAudit } from '../audit'
 import type { DatabaseUser, Lead, LeadStatus, ProductType } from '@/types'
 import { getUserEmailMap, withEmail } from '../user-emails'
+import { log } from '../logging'
+import { validatePasswordPolicy, isValidEmail } from '../validation'
 
 export async function createSeller(
   input: { email: string; password?: string; full_name: string; initial_balance?: number; role?: 'admin' | 'seller' },
   createdBy: string,
 ): Promise<{ userId: string }> {
   const admin = createAdminClient()
+
+  if (!isValidEmail(input.email)) throw new Error('INVALID_EMAIL')
+  if (!input.full_name.trim() || input.full_name.trim().length < 2) {
+    throw new Error('FULLNAME_INVALID')
+  }
+  if (input.password !== undefined && input.password !== '') {
+    const pwRes = validatePasswordPolicy(input.password)
+    if (!pwRes.ok) {
+      // Fehler als einfacher String, damit mapError via Key matchen kann
+      throw new Error(
+        'PASSWORT_SCHWACH: ' + pwRes.errors.join(' '),
+      )
+    }
+  }
 
   let authData: { user: any }
   let authErr: any = null
@@ -98,11 +114,15 @@ export async function updateSeller(
     if (patch.is_active === false) {
       try {
         await admin.auth.admin.updateUserById(userId, { ban_duration: '36500d' })
-      } catch {}
+      } catch (e) {
+        log.warn('ADMIN', 'Auth-Ban (Deaktivierung) fehlgeschlagen', { user_id: userId }, e)
+      }
     } else {
       try {
         await admin.auth.admin.updateUserById(userId, { ban_duration: '0s' })
-      } catch {}
+      } catch (e) {
+        log.warn('ADMIN', 'Auth-Unban (Reaktivierung) fehlgeschlagen', { user_id: userId }, e)
+      }
     }
     await logAudit(updatedBy, patch.is_active ? 'SELLER_ACTIVATED' : 'SELLER_DEACTIVATED', 'user', userId, {
       reason: reason ?? patch.deactivation_reason ?? null,
@@ -114,6 +134,8 @@ export async function updateSeller(
 
 export async function resetSellerPassword(userId: string, newPassword: string) {
   const admin = createAdminClient()
+  const pwRes = validatePasswordPolicy(newPassword)
+  if (!pwRes.ok) throw new Error('PASSWORT_SCHWACH: ' + pwRes.errors.join(' '))
   const { error } = await admin.auth.admin.updateUserById(userId, { password: newPassword })
   if (error) throw error
 }
@@ -871,15 +893,12 @@ export async function getCancellationRequests(status: 'pending' | 'approved' | '
     if (status !== 'all') q = q.eq('status', status)
     const res = await q
     if (res.error) {
-      // eslint-disable-next-line no-console
-      console.error('[getCancellationRequests] Query (mit JOINs) FEHLER:', res.error)
+      log.error('ADMIN', 'getCancellationRequests Query mit JOINs fehlgeschlagen', undefined, res.error)
       throw res.error
     }
     return (res.data ?? []) as any[]
   } catch (e1: any) {
-    // Versuch 2: OHNE JOINs (nur nackte Tabelle) – falls Schema in DB nicht vollständig ist
-    // eslint-disable-next-line no-console
-    console.warn('[getCancellationRequests] Fallback: Lese Stornos ohne JOINs. Fehler war:', e1.message)
+    log.warn('ADMIN', 'Fallback lade Stornos ohne JOINs', undefined, e1)
     let q2: any = admin
       .from('lead_cancellation_requests')
       .select('*')
@@ -887,8 +906,7 @@ export async function getCancellationRequests(status: 'pending' | 'approved' | '
     if (status !== 'all') q2 = q2.eq('status', status)
     const res2 = await q2
     if (res2.error) {
-      // eslint-disable-next-line no-console
-      console.error('[getCancellationRequests] Fallback (ohne JOINs) FEHLER:', res2.error)
+      log.error('ADMIN', 'Fallback (ohne JOINs) für Stornos fehlgeschlagen', undefined, res2.error)
       throw new Error(`Konnte Stornos nicht laden: ${res2.error?.message ?? 'Unbekannt'}`)
     }
     const rows = (res2.data ?? []) as any[]

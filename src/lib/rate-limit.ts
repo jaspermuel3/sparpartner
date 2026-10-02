@@ -102,29 +102,26 @@ export function rateLimit(
   }
 }
 
+const cfg_max_fail_tokens = 20
+
 /** Rate-Limit Wrapper, der zusätzlich bei Login nach falschem Passwort verlangsamt. */
 export function loginThrottle(
   req: Request | { headers: Headers },
   emailKey: string,
 ): { waitMs: number; blocked: boolean } {
-  // Erst IP-basiert prüfen
   const ipRes = rateLimit(req, 'login')
   if (!ipRes.ok) return { waitMs: ipRes.retryAfterMs, blocked: true }
 
-  // Zusätzlich per E-Mail zählen wir erfolglose Versuche und erhöhen Delay.
   const key = `login-fail:${emailKey.toLowerCase()}`
   const ex = STORE.get(key)
   if (!ex) {
-    STORE.set(key, { tokens: 0, lastRefill: nowMs() })
+    STORE.set(key, { tokens: cfg_max_fail_tokens, lastRefill: nowMs() })
     return { waitMs: 0, blocked: false }
   }
   const fails = Math.max(0, cfg_max_fail_tokens - ex.tokens)
-  // Linearer Backoff ab 3. Fehlversuch: +500ms pro Schritt, cap 3000ms
   const waitMs = fails < 3 ? 0 : Math.min(3_000, (fails - 2) * 500)
   return { waitMs, blocked: false }
 }
-
-const cfg_max_fail_tokens = 20
 
 export function recordLoginFailure(emailKey: string) {
   const key = `login-fail:${emailKey.toLowerCase()}`
