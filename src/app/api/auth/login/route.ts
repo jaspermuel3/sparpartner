@@ -160,11 +160,16 @@ export async function POST(request: NextRequest) {
         }
 
         try {
+          // Typ-Sicher: reines INSERT im try/catch.
+          // Falls für user_id bereits ein Wallet existiert → Unique-Constraint-Error
+          // wird von catch {} abgefangen und ignoriert.
+          // (Verhält sich identisch zu alter Variante mit .onConflict + .ignore(),
+          //  umgeht aber den TS2339 Build-Fehler "Property 'onConflict' does not
+          //  exist on type PostgrestFilterBuilder" bei Supabase JS v2 + strengen
+          //  generierten DB-Typen)
           await admin
             .from('token_wallets')
             .insert({ user_id: authUser.id, balance: fallbackRole === 'admin' ? 100 : 0 })
-            .onConflict('user_id')
-            .ignore()
         } catch {}
       } catch {}
     }
