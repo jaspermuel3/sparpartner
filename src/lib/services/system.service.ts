@@ -68,13 +68,20 @@ export async function getMaintenanceMode(): Promise<{
   enabled: boolean
   message: string
 }> {
-  const v = await getSetting<any>('maintenance_mode', null)
-  if (!v || typeof v !== 'object') {
-    return { enabled: false, message: 'Wartungsarbeiten. Bitte versuche es später erneut.' }
-  }
-  return {
-    enabled: Boolean(v.enabled),
-    message: typeof v.message === 'string' ? v.message : 'Wartungsarbeiten. Bitte versuche es später erneut.',
+  try {
+    const v = await getSetting<any>('maintenance_mode', null)
+    if (!v || typeof v !== 'object') {
+      return { enabled: false, message: 'Wartungsarbeiten. Bitte versuche es später erneut.' }
+    }
+    return {
+      enabled: Boolean(v.enabled),
+      message: typeof v.message === 'string' ? v.message : 'Wartungsarbeiten. Bitte versuche es später erneut.',
+    }
+  } catch (_e) {
+    return {
+      enabled: false,
+      message: 'Wartungsarbeiten. Bitte versuche es später erneut.',
+    }
   }
 }
 
@@ -92,9 +99,13 @@ export async function setMaintenanceMode(
 }
 
 export async function getLandingApiEnabled(): Promise<boolean> {
-  const v = await getSetting<any>('landing_api_enabled', null)
-  if (!v || typeof v !== 'object') return true
-  return Boolean(v.enabled)
+  try {
+    const v = await getSetting<any>('landing_api_enabled', null)
+    if (!v || typeof v !== 'object') return true
+    return Boolean(v.enabled)
+  } catch (_e) {
+    return true
+  }
 }
 
 export async function setLandingApiEnabled(enabled: boolean, updatedBy: string): Promise<void> {

@@ -4,15 +4,20 @@ import Image from 'next/image'
 
 export const metadata = { title: 'Anmelden · Sparpartner CRM' }
 
-export default async function LoginPage({
+export default function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ maintenance?: string; m?: string; error?: string }>
+  searchParams: { [key: string]: string | string[] | undefined }
 }) {
-  const resolved = await searchParams
-  const isMaintenance = (resolved.maintenance ?? '').trim() === '1'
+  const maintenanceRaw = searchParams.maintenance
+  const isMaintenance =
+    maintenanceRaw === '1' ||
+    maintenanceRaw === 'true' ||
+    (Array.isArray(maintenanceRaw) && maintenanceRaw.includes('1'))
+
   const maintenanceMessage = (() => {
-    const raw = (resolved.m ?? '').trim()
+    const rawRaw = searchParams.m
+    const raw = Array.isArray(rawRaw) ? rawRaw[0] ?? '' : rawRaw ?? ''
     if (!raw) return 'Wartungsarbeiten. Bitte versuche es später erneut.'
     try { return decodeURIComponent(raw) } catch { return raw }
   })()
@@ -103,18 +108,12 @@ export default async function LoginPage({
                     <ArrowLeft className="h-4 w-4" />
                     Status erneut prüfen
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url = new URL(window.location.href)
-                      url.searchParams.delete('maintenance')
-                      url.searchParams.delete('m')
-                      window.location.href = url.toString()
-                    }}
-                    className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-slate-800 sm:w-auto"
+                  <a
+                    href="/login"
+                    className="inline-flex min-h-[44px] w-full items-center justify-center rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-slate-800 sm:w-auto no-underline"
                   >
                     Zum Anmeldeformular
-                  </button>
+                  </a>
                 </div>
 
                 <p className="mt-8 text-center text-[11px] leading-relaxed text-slate-400">
