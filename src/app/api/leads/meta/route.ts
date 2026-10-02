@@ -125,8 +125,9 @@ function jsonResponse<T>(body: T, init: ResponseInit = {}): NextResponse<T> {
  * Gibt die campaign_id (UUID) zurück, falls einsatzbereit, sonst null.
  *
  * Wichtig: Neue Meta-Kampagnen werden IMMER direkt angelegt – auch wenn Meta
- * keine native campaign_id liefert. Dafür bauen wir eine stabile external_id
- * aus Kampagnen-Name + UTM, sodass Duplikate ausgeschlossen sind.
+ * keine native campaign_id liefert und auch ohne Namen/UTM.
+ * Wir bauen in JEDES Fall eine stabile external_id, sodass Duplikate ausgeschlossen
+ * sind und der Kampagnen-Datensatz garantiert angelegt wird.
  */
 async function upsertMetaCampaign(
   admin: ReturnType<typeof createAdminClient>,
@@ -136,19 +137,23 @@ async function upsertMetaCampaign(
   const rawMetaCampaignId = sanitizeNullable(payload.campaign_id ?? meta.campaign_id, 128)
   const rawMetaName = sanitizeNullable(payload.campaign_name ?? meta.campaign_name, 200)
   const utmName = sanitizeNullable(payload.utm?.campaign ?? payload.utm_campaign, 200)
+
+  const defaultName = 'Meta Ads · Standard'
   const humanName =
-    sanitizeText(rawMetaName ?? utmName ?? 'Meta Lead Ads Kampagne', 200) ||
-    'Meta Lead Ads Kampagne'
+    sanitizeText(rawMetaName ?? utmName ?? defaultName, 200) || defaultName
 
   const sourceLabel: any = 'meta_ads'
 
-  // Immer eine stabile external_id bauen (Meta-campaign_id bevorzugt, sonst Hash aus Name+UTM)
-  // => auch "neue" Kampagnen landen IMMER im Upsert und werden automatisch angelegt.
+  // ============== IMMER eine stabile external_id bauen (garantiert != null) ==============
+  // 1) Priorität: Meta-native campaign_id
+  // 2) Fallback: Hash aus Kampagnenname + UTM
+  // 3) Letztes Fallback: täglicher Bucket → alle namenlosen Leads eines Tages landen in derselben Standardkampagne
   let externalId: string | null = rawMetaCampaignId
   if (!externalId) {
     const parts: string[] = []
     if (rawMetaName) parts.push(rawMetaName)
     if (utmName) parts.push(utmName)
+
     if (parts.length > 0) {
       const raw = parts.join('||')
       const slug = raw
@@ -163,6 +168,13 @@ async function upsertMetaCampaign(
       }
       const suffix = (hash >>> 0).toString(16).padStart(8, '0')
       externalId = `meta::auto::${slug}_${suffix}`
+    } else {
+      // Letztes Fallback: Alle namenlosen Meta-Leads eines Tages landen in EINER Kampagne
+      const today = new Date()
+      const yyyy = today.getFullYear()
+      const mm = String(today.getMonth() + 1).padStart(2, '0')
+      const dd = String(today.getDate()).padStart(2, '0')
+      externalId = `meta::default::${yyyy}${mm}${dd}`
     }
   }
 
@@ -170,50 +182,97 @@ async function upsertMetaCampaign(
     name: humanName,
     source: sourceLabel,
     is_active: true,
+    external_id: externalId,
   }
-  if (externalId) toUpsert.external_id = externalId
 
+  log.info('META_LEADS', 'Kampagnen-Upsert wird versucht', {
+    external_id: externalId,
+    campaign_name: humanName,
+    source: sourceLabel,
+  })
+
+  let lastError: unknown = null
+
+  // ====== 1) Versuch: Upsert via external_id ======
   try {
-    if (externalId) {
-      const { data, error } = await admin
-        .from('campaigns')
-        .upsert(toUpsert, { onConflict: 'external_id', ignoreDuplicates: false })
-        .select('id')
-        .limit(1)
-        .maybeSingle()
-      if (data && !error) return (data as { id: string }).id
-      if (error) {
-        log.warn('META_LEADS', 'Campaign Upsert mit external_id fehlgeschlagen – fallback', { external_id: externalId }, error)
-      }
-    }
-
-    // Fallback: Lookup + Insert (falls Unique-Constraint fehlt oder Upsert blockiert ist)
-    {
-      const lookup = admin
-        .from('campaigns')
-        .select('id')
-        .limit(1)
-      if (externalId) {
-        lookup.or(`external_id.eq.${externalId},and(source.eq.${sourceLabel},name.eq.${humanName})`)
-      } else {
-        lookup.eq('source', sourceLabel as any).eq('name', humanName)
-      }
-      const { data: existing } = await lookup.maybeSingle()
-      if (existing) return (existing as { id: string }).id
-
-      const { data, error } = await admin
-        .from('campaigns')
-        .insert(toUpsert)
-        .select('id')
-        .limit(1)
-        .maybeSingle()
-      if (error || !data) return null
+    const { data, error } = await admin
+      .from('campaigns')
+      .upsert(toUpsert, { onConflict: 'external_id', ignoreDuplicates: false })
+      .select('id')
+      .limit(1)
+      .maybeSingle()
+    if (data && !error) {
+      log.info('META_LEADS', 'Kampagnen-Upsert erfolgreich', {
+        external_id: externalId,
+        campaign_id: (data as { id: string }).id,
+      })
       return (data as { id: string }).id
     }
+    if (error) {
+      log.warn('META_LEADS', 'Campaign Upsert mit external_id fehlgeschlagen – fallback', {
+        external_id: externalId,
+      }, error)
+      lastError = error
+    }
   } catch (e) {
-    log.warn('META_LEADS', 'Kampagnen-Upsert ist fehlgeschlagen (swallowed)', undefined, e)
-    return null
+    log.warn('META_LEADS', 'Campaign Upsert Exception – fallback', {
+      external_id: externalId,
+    }, e)
+    lastError = e
   }
+
+  // ====== 2) Fallback A: Lookup nach gleicher external_id oder (source + name) ======
+  try {
+    const lookup = admin
+      .from('campaigns')
+      .select('id')
+      .limit(1)
+      .or(`external_id.eq.${externalId},and(source.eq.${sourceLabel},name.eq.${humanName})`)
+    const { data: existing } = await lookup.maybeSingle()
+    if (existing) return (existing as { id: string }).id
+  } catch (e) {
+    log.warn('META_LEADS', 'Kampagnen-Lookup fehlgeschlagen, setze Insert fort', undefined, e)
+    lastError = e
+  }
+
+  // ====== 3) Fallback B: Einfaches Insert (ohne external_id-Conflict) ======
+  // Wenn Spalte/Unique-Constraint in der DB noch fehlt, versuchen wir's
+  // zumindest als reinen Insert, damit die Kampagne trotzdem angelegt wird.
+  try {
+    const { data, error } = await admin
+      .from('campaigns')
+      .insert({
+        name: humanName,
+        source: sourceLabel,
+        is_active: true,
+      })
+      .select('id')
+      .limit(1)
+      .maybeSingle()
+    if (data && !error) {
+      log.info('META_LEADS', 'Kampagnen-Insert (Fallback ohne external_id) erfolgreich', {
+        external_id: externalId,
+        campaign_id: (data as { id: string }).id,
+      })
+      return (data as { id: string }).id
+    }
+    if (error) lastError = error
+  } catch (e) {
+    log.error('META_LEADS', 'Kampagnen-Insert (Fallback) fehlgeschlagen', {
+      external_id: externalId,
+    }, e)
+    lastError = e
+  }
+
+  // Wenn wir hier landen, ist irgendwas fundamental kaputt (z.B. fehlende Spalten oder
+  // Migration 0021 nicht ausgeführt) → loggen und null zurück.
+  log.error(
+    'META_LEADS',
+    'Kampagne konnte NICHT angelegt werden (sind Migrationen 0021 aktiv? campaigns.external_id + Unique Constraint? campaigns ENUM source meta_ads vorhanden?)',
+    { external_id: externalId, name: humanName },
+    lastError,
+  )
+  return null
 }
 
 export async function OPTIONS(req: Request) {
