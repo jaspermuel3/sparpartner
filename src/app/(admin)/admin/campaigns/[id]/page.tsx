@@ -47,6 +47,7 @@ import {
   UserCircle2,
   Zap,
   Boxes,
+  Layers3,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
@@ -83,7 +84,7 @@ export default async function AdminCampaignDetailPage(props: {
   const sortDir = sp.dir === 'asc' ? 'asc' : 'desc'
   const statusFilter = (sp.status && sp.status.trim() && sp.status !== 'all') ? sp.status.trim() : null
 
-  const [campaign, leads] = await Promise.all([
+  const [campaign, leads, allCampaignLeadsRes] = await Promise.all([
     getCampaignById(campaignId),
     getCampaignLeads(campaignId, {
       page,
@@ -91,6 +92,12 @@ export default async function AdminCampaignDetailPage(props: {
       sortBy,
       sortDir,
       statuses: statusFilter ? [statusFilter as any] : undefined,
+    }),
+    getCampaignLeads(campaignId, {
+      page: 1,
+      pageSize: 1000,
+      sortBy: 'created_at',
+      sortDir: 'desc',
     }),
   ])
 
@@ -105,6 +112,86 @@ export default async function AdminCampaignDetailPage(props: {
   const closed = Number(stats.closed ?? 0)
   const quote = Number(stats.quote ?? 0)
   const budget = Number((campaign as any).budget_amount ?? 0) || 0
+
+  const allLeadsForStats = (allCampaignLeadsRes.rows ?? []) as any[]
+
+  function buildPerDayLast7(rows: any[]) {
+    const out: Array<{ date: string; count: number; label: string }> = []
+    const now = new Date()
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now)
+      d.setDate(d.getDate() - i)
+      const iso = d.toISOString().slice(0, 10)
+      out.push({
+        date: iso,
+        count: 0,
+        label: d.toLocaleDateString('de-DE', { weekday: 'short' }).slice(0, 2),
+      })
+    }
+    const index = new Map<string, number>()
+    out.forEach((d, i) => index.set(d.date, i))
+    for (const r of rows) {
+      if (!r.created_at) continue
+      const iso = new Date(r.created_at).toISOString().slice(0, 10)
+      const i = index.get(iso)
+      if (i === undefined) continue
+      out[i].count++
+    }
+    return out
+  }
+
+  function buildTopZips(rows: any[], n = 6) {
+    const counts = new Map<string, { city?: string; count: number }>()
+    for (const r of rows) {
+      const zip = String(r.zip ?? '').trim()
+      if (!zip) continue
+      const cur = counts.get(zip) ?? { city: r.city ?? undefined, count: 0 }
+      cur.count++
+      counts.set(zip, cur)
+    }
+    return Array.from(counts.entries())
+      .map(([zip, v]) => ({ zip, city: v.city, count: v.count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, n)
+  }
+
+  function buildProductBreakdown(rows: any[]) {
+    const out: Record<string, number> = { strom: 0, gas: 0, beides: 0, sonstiges: 0 }
+    for (const r of rows) {
+      const p = String(r.product ?? '')
+      if (p === 'strom' || p === 'gas' || p === 'beides') out[p]++
+      else out.sonstiges++
+    }
+    return out
+  }
+
+  function buildConsultationRate(rows: any[]) {
+    if (rows.length === 0) return 0
+    let yes = 0
+    for (const r of rows) {
+      if (r.wants_consultation === true || r.wants_consultation === 'true' || r.wants_consultation === 't' || r.wants_consultation === 'yes') yes++
+    }
+    return yes / rows.length
+  }
+
+  function buildAvgPotential(rows: any[]) {
+    const nums: number[] = []
+    for (const r of rows) {
+      const s = Number(r.estimated_savings ?? 0) || Number(r.savings_potential ?? 0) || 0
+      if (s > 0) nums.push(s)
+    }
+    if (nums.length === 0) return 0
+    return nums.reduce((a, b) => a + b, 0) / nums.length
+  }
+
+  const perDay7 = buildPerDayLast7(allLeadsForStats)
+  const topZips = buildTopZips(allLeadsForStats)
+  const productBreakdown = buildProductBreakdown(allLeadsForStats)
+  const consultationRate = buildConsultationRate(allLeadsForStats)
+  const avgPotential = buildAvgPotential(allLeadsForStats)
+  const allAssigned = allLeadsForStats.filter((r) => !!r.assigned_user_id).length
+  const allClosed = allLeadsForStats.filter((r) => r.status === 'closed').length
+  const allCanceled = allLeadsForStats.filter((r) => r.status === 'canceled').length
 
   const COST_PER_ABSCHLUSS_TARGET = 50
   let roiStatus: 'good' | 'warn' | 'bad' | 'none' = 'none'
@@ -223,6 +310,18 @@ export default async function AdminCampaignDetailPage(props: {
           }
         />
       </div>
+
+      <CampaignStatsSection
+        perDay7={perDay7}
+        topZips={topZips}
+        productBreakdown={productBreakdown}
+        consultationRate={consultationRate}
+        avgPotential={avgPotential}
+        allAssigned={allAssigned}
+        allClosed={allClosed}
+        allCanceled={allCanceled}
+        allTotal={allLeadsForStats.length}
+      />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="border-slate-200 bg-white shadow-sm overflow-hidden">
@@ -449,6 +548,301 @@ export default async function AdminCampaignDetailPage(props: {
                 )}
               </>
             )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function CampaignStatsSection({
+  perDay7,
+  topZips,
+  productBreakdown,
+  consultationRate,
+  avgPotential,
+  allAssigned,
+  allClosed,
+  allCanceled,
+  allTotal,
+}: {
+  perDay7: Array<{ date: string; count: number; label: string }>
+  topZips: Array<{ zip: string; city?: string; count: number }>
+  productBreakdown: Record<string, number>
+  consultationRate: number
+  avgPotential: number
+  allAssigned: number
+  allClosed: number
+  allCanceled: number
+  allTotal: number
+}) {
+  const spark = perDay7
+  const sparkMax = Math.max(1, ...spark.map((x) => x.count))
+  const sparkSum = spark.reduce((a, b) => a + b.count, 0)
+  const sparkLast = spark[spark.length - 1]?.count ?? 0
+  const sparkPrev = spark[spark.length - 2]?.count ?? 0
+  const sparkDelta = sparkPrev === 0 ? (sparkLast > 0 ? 100 : 0) : ((sparkLast - sparkPrev) / sparkPrev) * 100
+
+  function Sparkline({ data, max }: { data: Array<{ count: number }>; max: number }) {
+    const W = 120
+    const H = 28
+    const pts = data.map((d, i) => {
+      const x = (i / Math.max(1, data.length - 1)) * W
+      const y = H - (Math.max(0, d.count) / max) * (H - 4) - 2
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-[120px] h-7 shrink-0">
+        <defs>
+          <linearGradient id="sparkFill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <polygon
+          fill="url(#sparkFill)"
+          points={`0,${H} ${pts.join(' ')} ${W},${H}`}
+          className="text-emerald-500"
+        />
+        <polyline
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          points={pts.join(' ')}
+          className="text-emerald-600"
+        />
+      </svg>
+    )
+  }
+
+  function BarsChart({ data }: { data: Array<{ date: string; count: number; label: string }> }) {
+    const max = Math.max(1, ...data.map((d) => d.count))
+    return (
+      <div className="space-y-2">
+        <div className="flex items-end gap-2 h-32">
+          {data.map((d) => {
+            const h = (d.count / max) * 100
+            return (
+              <div key={d.date} className="flex flex-1 flex-col items-center gap-1.5">
+                <div className="w-full flex items-end justify-center h-full">
+                  <div
+                    className="w-full rounded-t-md bg-gradient-to-t from-emerald-500 to-emerald-400 border border-emerald-600/20 min-h-[4px] transition-[height] duration-300"
+                    style={{ height: `${Math.max(4, h)}%` }}
+                  />
+                </div>
+                <div className="flex flex-col items-center leading-none">
+                  <div className="text-[10px] font-semibold tabular-nums text-slate-700">{d.count}</div>
+                  <div className="text-[9px] uppercase tracking-wider text-slate-400 mt-0.5">{d.label}</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  function MiniCard({
+    label,
+    value,
+    hint,
+    accent,
+  }: {
+    label: string
+    value: React.ReactNode
+    hint?: React.ReactNode
+    accent?: 'default' | 'success' | 'warning' | 'danger'
+  }) {
+    const accentBg: Record<string, string> = {
+      default: 'bg-slate-50 text-slate-600 border-slate-200',
+      success: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      warning: 'bg-amber-50 text-amber-700 border-amber-200',
+      danger: 'bg-red-50 text-red-700 border-red-200',
+    }
+    return (
+      <div className="flex flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-slate-400">{label}</div>
+        <div className="mt-1 flex items-end justify-between gap-3">
+          <div className="text-2xl font-semibold tracking-tight text-slate-900 leading-none">
+            {value}
+          </div>
+          <span className={cn('inline-flex min-h-5 items-center rounded-md px-1.5 text-[10px] font-semibold border', accentBg[accent ?? 'default'])}>
+            {hint ?? '—'}
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  const cancelRate = allTotal > 0 ? allCanceled / allTotal : 0
+
+  return (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="space-y-4 lg:col-span-2">
+        <Card className="border-slate-200 bg-white shadow-sm overflow-hidden">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold tracking-tight inline-flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-emerald-500" />
+              Kampagnen-Statistiken
+              <span className="ml-2 text-xs font-normal text-slate-500">
+                letzte 7 Tage · {sparkSum} Leads
+                {sparkDelta !== 0 && (
+                  <span
+                    className={cn(
+                      'ml-2 inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-semibold border',
+                      sparkDelta > 0
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-red-50 text-red-700 border-red-200',
+                    )}
+                  >
+                    {sparkDelta > 0 ? '+' : ''}
+                    {Math.round(sparkDelta)}%
+                  </span>
+                )}
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-4">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <MiniCard
+                label="Leads 7 Tage"
+                value={sparkSum}
+                hint={sparkDelta === 0 ? 'Ø' : sparkDelta > 0 ? `↑ ${Math.round(sparkDelta)}%` : `↓ ${Math.round(Math.abs(sparkDelta))}%`}
+                accent={sparkDelta >= 0 ? 'success' : 'danger'}
+              />
+              <MiniCard
+                label="Beratungsrate"
+                value={formatPercent(consultationRate)}
+                hint={consultationRate >= 0.9 ? 'Sehr gut' : consultationRate >= 0.7 ? 'OK' : 'Niedrig'}
+                accent={consultationRate >= 0.9 ? 'success' : consultationRate >= 0.7 ? 'default' : 'warning'}
+              />
+              <MiniCard
+                label="Ø Sparpotenzial"
+                value={avgPotential > 0 ? `${formatCurrency(avgPotential)} €` : '—'}
+                hint={avgPotential >= 400 ? 'Hohe Ersparnis' : avgPotential >= 200 ? 'Solide' : 'Niedrig'}
+                accent={avgPotential >= 400 ? 'success' : avgPotential >= 200 ? 'default' : 'warning'}
+              />
+              <MiniCard
+                label="Abbruchrate"
+                value={formatPercent(cancelRate)}
+                hint={cancelRate <= 0.05 ? 'Niedrig' : cancelRate <= 0.15 ? 'OK' : 'Hoch'}
+                accent={cancelRate <= 0.05 ? 'success' : cancelRate <= 0.15 ? 'default' : 'danger'}
+              />
+            </div>
+
+            <div className="pt-2">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-xs font-semibold text-slate-700">Neue Leads pro Tag (letzte 7 Tage)</div>
+                <div className="text-[10px] text-slate-400">Inkl. Wochentag</div>
+              </div>
+              <BarsChart data={perDay7} />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="space-y-4">
+        <Card className="border-slate-200 bg-white shadow-sm overflow-hidden">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold tracking-tight inline-flex items-center gap-2">
+              <Layers3 className="h-4 w-4 text-slate-400" />
+              Top PLZ-Regionen
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-2">
+            {topZips.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 py-5 text-center text-xs text-slate-500">
+                Noch keine PLZ-Daten vorhanden
+              </div>
+            ) : (
+              topZips.map((z, i) => {
+                const pct = allTotal > 0 ? (z.count / allTotal) * 100 : 0
+                const topMax = topZips[0].count
+                return (
+                  <div key={z.zip} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-[10px] font-semibold text-slate-600 tabular-nums">
+                          {i + 1}
+                        </span>
+                        <span className="font-semibold text-slate-900 tabular-nums">{z.zip}</span>
+                        {z.city ? <span className="text-slate-500">· {z.city}</span> : null}
+                      </div>
+                      <span className="tabular-nums font-semibold text-slate-700">
+                        {z.count}
+                        <span className="ml-1 font-normal text-slate-400">({Math.round(pct)}%)</span>
+                      </span>
+                    </div>
+                    <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="absolute left-0 top-0 h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400"
+                        style={{ width: `${Math.max(6, (z.count / Math.max(1, topMax)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-slate-200 bg-white shadow-sm overflow-hidden">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold tracking-tight inline-flex items-center gap-2">
+              <Boxes className="h-4 w-4 text-slate-400" />
+              Produkt-Verteilung
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-2.5">
+            {(['strom', 'gas', 'beides', 'sonstiges'] as const).map((k) => {
+              const c = productBreakdown[k] ?? 0
+              const pct = allTotal > 0 ? (c / allTotal) * 100 : 0
+              if (k === 'sonstiges' && c === 0) return null
+              const accentMap: Record<string, { bar: string; pill: string }> = {
+                strom: { bar: 'from-amber-500 to-amber-400', pill: 'bg-amber-50 text-amber-700 border-amber-200' },
+                gas: { bar: 'from-sky-500 to-sky-400', pill: 'bg-sky-50 text-sky-700 border-sky-200' },
+                beides: { bar: 'from-violet-500 to-violet-400', pill: 'bg-violet-50 text-violet-700 border-violet-200' },
+                sonstiges: { bar: 'from-slate-500 to-slate-400', pill: 'bg-slate-50 text-slate-700 border-slate-200' },
+              }
+              const labels: Record<string, string> = { strom: 'Strom', gas: 'Gas', beides: 'Beides', sonstiges: 'Sonstige' }
+              return (
+                <div key={k} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className={cn('inline-flex h-5 items-center rounded-md border px-1.5 text-[10px] font-semibold', accentMap[k].pill)}>
+                        {labels[k]}
+                      </span>
+                    </div>
+                    <span className="tabular-nums font-semibold text-slate-700">
+                      {c}
+                      <span className="ml-1 font-normal text-slate-400">({Math.round(pct)}%)</span>
+                    </span>
+                  </div>
+                  <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={cn('absolute left-0 top-0 h-full rounded-full bg-gradient-to-r', accentMap[k].bar)}
+                      style={{ width: `${Math.max(4, pct)}%` }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+            <div className="mt-2 grid grid-cols-3 divide-x divide-slate-100 border-t border-slate-100 pt-3 mt-3">
+              <div className="px-1 text-center">
+                <div className="text-[11px] uppercase tracking-wider text-slate-400">Zugeordnet</div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-slate-900">{allAssigned}</div>
+              </div>
+              <div className="px-1 text-center">
+                <div className="text-[11px] uppercase tracking-wider text-slate-400">Abgeschlossen</div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-emerald-700">{allClosed}</div>
+              </div>
+              <div className="px-1 text-center">
+                <div className="text-[11px] uppercase tracking-wider text-slate-400">Abgebrochen</div>
+                <div className="mt-0.5 text-sm font-semibold tabular-nums text-red-700">{allCanceled}</div>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>

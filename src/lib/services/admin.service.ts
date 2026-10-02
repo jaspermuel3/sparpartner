@@ -1212,17 +1212,17 @@ export async function reviewCancellation(requestId: string, byUserId: string, ap
       console.error('[reviewCancellation] Lead soft-delete FEHLER (Review trotzdem OK!):', lerr)
     }
     if (refundTokens && l?.assigned_user_id && l?.token_cost) {
-      try {
-        await admin.rpc('credit_tokens', {
-          p_target_user_id: l.assigned_user_id,
-          p_amount: Number(l.token_cost),
-          p_reason: `Stornierung Lead #${r.lead_id.slice(0, 8)}`,
-          p_type: 'rueckerstattung',
-          p_created_by: byUserId,
-        })
-      } catch (rpcErr: any) {
+      const { error: rpcErr } = await admin.rpc('credit_tokens', {
+        p_target_user_id: l.assigned_user_id,
+        p_amount: Number(l.token_cost),
+        p_reason: `Stornierung Lead #${r.lead_id.slice(0, 8)}`,
+        p_type: 'rueckerstattung' as any,
+        p_created_by: byUserId,
+      })
+      if (rpcErr) {
         // eslint-disable-next-line no-console
         console.error('[reviewCancellation] credit_tokens RPC FEHLER:', rpcErr)
+        throw new Error(`TOKEN_REFUND_FEHLER: ${rpcErr.message || rpcErr}`)
       }
     }
     await logAudit(byUserId, 'LEAD_CANCEL_APPROVED', 'lead', r.lead_id, { refundTokens, reason })

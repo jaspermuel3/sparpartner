@@ -24,6 +24,47 @@ function loadPrefsFromAttr(): NotifyPrefs {
   }
 }
 
+const DEDUP_STORAGE_KEY = 'crm:notif:dedup_seen_v1'
+const DEDUP_TTL_MS = 5 * 60 * 1000
+
+function loadDedupMap(): Map<string, number> {
+  if (typeof window === 'undefined') return new Map()
+  try {
+    const raw = localStorage.getItem(DEDUP_STORAGE_KEY)
+    if (!raw) return new Map()
+    const obj = JSON.parse(raw) as Record<string, number>
+    const now = Date.now()
+    const m = new Map<string, number>()
+    for (const [k, v] of Object.entries(obj)) {
+      if (now - v < DEDUP_TTL_MS) m.set(k, v)
+    }
+    return m
+  } catch {
+    return new Map()
+  }
+}
+
+function persistDedupMap(m: Map<string, number>) {
+  if (typeof window === 'undefined') return
+  try {
+    const obj: Record<string, number> = {}
+    const now = Date.now()
+    for (const [k, v] of m.entries()) {
+      if (now - v < DEDUP_TTL_MS) obj[k] = v
+    }
+    localStorage.setItem(DEDUP_STORAGE_KEY, JSON.stringify(obj))
+  } catch {}
+}
+
+function isSeenAndMark(map: Map<string, number>, key: string): boolean {
+  const now = Date.now()
+  const last = map.get(key) ?? 0
+  if (now - last < DEDUP_TTL_MS) return true
+  map.set(key, now)
+  persistDedupMap(map)
+  return false
+}
+
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -31,6 +72,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     typeof process !== 'undefined' && process.env.NEXT_PUBLIC_DISABLE_NOTIFICATIONS === '1'
   const channelRef = useRef<any>(null)
   const callbackTimersRef = useRef<Map<string, number>>(new Map())
+  const dedupSeenRef = useRef<Map<string, number>>(new Map())
   const [prefs, setPrefs] = useState<NotifyPrefs>(() => loadPrefsFromAttr())
 
   useEffect(() => {
@@ -41,6 +83,14 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     const obs = new MutationObserver(() => setPrefs(loadPrefsFromAttr()))
     obs.observe(el, { attributes: true })
     return () => obs.disconnect()
+  }, [])
+
+  useEffect(() => {
+    dedupSeenRef.current = loadDedupMap()
+    const t = setInterval(() => {
+      dedupSeenRef.current = loadDedupMap()
+    }, 60_000)
+    return () => clearInterval(t)
   }, [])
 
   useEffect(() => {
@@ -79,6 +129,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           (payload: any) => {
             if (!prefs.push_leads) return
             const newLead = payload?.new ?? {}
+            const dedupKey = `lead_assigned:${newLead.id}`
+            if (isSeenAndMark(dedupSeenRef.current, dedupKey)) return
             toast('Neuer Lead zugewiesen', {
               description: `${newLead.first_name ?? ''} ${newLead.last_name ?? ''}`.trim() || 'Jetzt ansehen',
               icon: <UserPlus className="h-4 w-4 text-blue-600" />,
@@ -108,6 +160,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
             if (!tx.amount) return
             const isCredit = tx.amount > 0
             if (!isCredit) return
+            const dedupKey = `token_credit:${tx.id ?? `${tx.amount}:${tx.reason}:${tx.created_at}`}`
+            if (isSeenAndMark(dedupSeenRef.current, dedupKey)) return
             toast(`${tx.amount} Token gutgeschrieben`, {
               description: tx.reason || 'Dein Token-Guthaben wurde aktualisiert.',
               icon: <Coins className="h-4 w-4 text-amber-500" />,

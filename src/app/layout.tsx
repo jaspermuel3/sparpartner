@@ -11,6 +11,10 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'Sparpartner CRM',
   description: 'CRM für Strom- und Gasvertrieb · Sparpartner24',
+  icons: {
+    icon: '/sparpartner-logo.svg',
+    apple: '/sparpartner-logo.svg',
+  },
 }
 
 export default function RootLayout({

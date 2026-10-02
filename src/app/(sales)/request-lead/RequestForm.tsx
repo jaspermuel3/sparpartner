@@ -38,7 +38,7 @@ const PRODUCT_OPTIONS: Array<{ value: ProductOption; label: string }> = [
 ]
 
 const COOLDOWN_MS = 4000
-const POLL_INTERVAL_MS = 6000
+const POLL_INTERVAL_MS = 3500
 
 type AvailableBreakdown = { total: number; strom: number; gas: number; beides: number }
 const DEFAULT_BREAKDOWN: AvailableBreakdown = { total: 0, strom: 0, gas: 0, beides: 0 }
@@ -58,6 +58,8 @@ export function RequestForm({
   const [available, setAvailable] = useState<AvailableBreakdown>(initialAvailable ?? DEFAULT_BREAKDOWN)
   const [countPop, setCountPop] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isWaitlisted, setIsWaitlisted] = useState<boolean>(!!initialWaitlist)
+  const [waitlistLiveJustArrived, setWaitlistLiveJustArrived] = useState(false)
 
   const refreshAvailable = useCallback(async (silent = true) => {
     if (!silent) setIsRefreshing(true)
@@ -74,6 +76,22 @@ export function RequestForm({
           if (changed) {
             setCountPop(true)
             window.setTimeout(() => setCountPop(false), 350)
+            if (prev.total === 0 && next.total > 0) {
+              setIsWaitlisted((w) => {
+                if (w) {
+                  setWaitlistLiveJustArrived(true)
+                  window.setTimeout(() => setWaitlistLiveJustArrived(false), 6000)
+                  try {
+                    const evt = new CustomEvent('request-lead:available-ping', {
+                      detail: { count: next.total },
+                    })
+                    window.dispatchEvent(evt)
+                  } catch {}
+                  return false
+                }
+                return w
+              })
+            }
           }
           return next
         })
@@ -132,7 +150,17 @@ export function RequestForm({
   useActionFeedback(waitlistState)
   useActionFeedback(leaveState)
 
-  const noLeadAvailable = requestState?.error?.includes('kein Lead verfügbar') ?? false
+  useEffect(() => {
+    if (waitlistState?.ok) setIsWaitlisted(true)
+  }, [waitlistState])
+
+  useEffect(() => {
+    if (leaveState?.ok) setIsWaitlisted(false)
+  }, [leaveState])
+
+  const noLeadAvailable =
+    requestState?.error?.includes('kein Lead verfügbar') ??
+    (isWaitlisted && available.total === 0)
   const disabled = balance <= 0
 
   // Button-Zustände für Animationen
@@ -275,7 +303,30 @@ export function RequestForm({
             </div>
           ) : null}
 
-          {initialWaitlist || waitlistState?.ok ? (
+          {waitlistLiveJustArrived ? (
+            <div className="w-full max-w-md rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 text-left fade-slide-up shadow-sm shadow-emerald-100">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 border border-emerald-200">
+                  <CheckCircle2 className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-emerald-900">Leads wieder verfügbar!</div>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Live
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-emerald-800">
+                    Es sind jetzt <span className="font-semibold">{available.total} Lead(s)</span> im Pool.
+                    Fordere unten direkt einen an!
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {isWaitlisted && available.total === 0 && !waitlistLiveJustArrived ? (
             <WaitlistCard
               product={initialWaitlist?.product ?? (product !== 'all' ? product : undefined)}
               createdAt={initialWaitlist?.created_at ?? new Date().toISOString()}
@@ -335,7 +386,7 @@ export function RequestForm({
             </div>
           </div>
 
-          {noLeadAvailable && !initialWaitlist && !disabled ? (
+          {noLeadAvailable && !isWaitlisted && !disabled ? (
             <form action={waitlistFormAction} className="pt-2 w-full max-w-sm">
               <input type="hidden" name="product" value={product === 'all' ? '' : product} />
               <SubmitButton

@@ -186,6 +186,11 @@ export default async function AdminStatsPage({
     return <span className="text-[10px] font-bold tabular-nums">#{rank}</span>
   }
 
+  const approvedCancellations =
+    Number((stats as any).approved_cancellations ?? dashboard.lost_leads ?? stats.verlorene_leads ?? 0) || 0
+  const refundedTokensRaw = (stats as any).refunded_tokens ?? 0
+  const refundedTokens = Number(refundedTokensRaw) || 0
+
   const funnelData = [
     {
       name: 'Neue Leads',
@@ -211,6 +216,11 @@ export default async function AdminStatsPage({
       name: 'Abgeschlossen',
       value: stats.abschlüsse,
       fill: '#10b981',
+    },
+    {
+      name: 'Storniert / Abgelehnt',
+      value: approvedCancellations,
+      fill: '#ef4444',
     },
   ]
 
@@ -354,29 +364,41 @@ export default async function AdminStatsPage({
                         )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-center border-t border-slate-100 pt-3">
+                    <div className="grid grid-cols-4 gap-1.5 text-center border-t border-slate-100 pt-3">
                       <div>
-                        <div className="text-sm font-bold text-emerald-700 tabular-nums">
+                        <div className="text-[13px] font-bold text-emerald-700 tabular-nums">
                           {formatPercent(p.abschluss_quote ?? 0)}
                         </div>
-                        <div className="text-[9px] uppercase tracking-wider text-slate-400 font-semibold mt-0.5">
+                        <div className="text-[8px] uppercase tracking-wider text-slate-400 font-semibold mt-0.5">
                           Quote
                         </div>
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-slate-800 tabular-nums">
+                        <div className="text-[13px] font-bold text-slate-800 tabular-nums">
                           {p.abschlüsse ?? 0}
                         </div>
-                        <div className="text-[9px] uppercase tracking-wider text-slate-400 font-semibold mt-0.5">
+                        <div className="text-[8px] uppercase tracking-wider text-slate-400 font-semibold mt-0.5">
                           Abschl.
                         </div>
                       </div>
                       <div>
-                        <div className="text-sm font-bold text-slate-700 tabular-nums">
+                        <div className="text-[13px] font-bold text-slate-700 tabular-nums">
                           {p.leads_total ?? 0}
                         </div>
-                        <div className="text-[9px] uppercase tracking-wider text-slate-400 font-semibold mt-0.5">
+                        <div className="text-[8px] uppercase tracking-wider text-slate-400 font-semibold mt-0.5">
                           Leads
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[13px] font-bold tabular-nums text-red-700">
+                          {formatPercent(
+                            Number(p.leads_total ?? 0) > 0
+                              ? Number(p.verloren ?? 0) / Number(p.leads_total ?? 1)
+                              : 0,
+                          )}
+                        </div>
+                        <div className="text-[8px] uppercase tracking-wider text-slate-400 font-semibold mt-0.5">
+                          Verloren
                         </div>
                       </div>
                     </div>
@@ -412,10 +434,12 @@ export default async function AdminStatsPage({
           <StatCard label="Angebote" value={stats.angebote} icon={<FileSignature className="h-4 w-4" />} accent="default" />
         </div>
       </Suspense>
-      <Suspense fallback={<StatsGridSkeleton cols={4} />}>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <Suspense fallback={<StatsGridSkeleton cols={6} />}>
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
           <StatCard label="Abschlüsse" value={stats.abschlüsse} icon={<CheckCircle2 className="h-4 w-4" />} accent="success" />
           <StatCard label="Verlorene Leads" value={stats.verlorene_leads} icon={<XCircle className="h-4 w-4" />} accent="danger" />
+          <StatCard label="Stornierungen" value={approvedCancellations} icon={<XCircle className="h-4 w-4" />} accent="warning" />
+          <StatCard label="Tok. rückerst." value={refundedTokens || '—'} icon={<Sparkles className="h-4 w-4" />} accent={refundedTokens > 0 ? 'warning' : 'default'} />
           <StatCard
             label="Abschlussquote"
             value={formatPercent(stats.abschluss_quote)}
