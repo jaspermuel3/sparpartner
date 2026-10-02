@@ -12,6 +12,7 @@ import {
   stripBomWs,
 } from '@/lib/validation'
 import { getLandingApiEnabled } from '@/lib/services/system.service'
+import { timingSafeEqual } from '@/lib/utils'
 import type { ProductType } from '@/types'
 
 export const runtime = 'nodejs'
@@ -75,25 +76,6 @@ function corsResponseInit(req: Request, init: ResponseInit = {}): ResponseInit {
 
 function jsonWithCors<T>(req: Request, body: T, init: ResponseInit = {}): NextResponse<T> {
   return NextResponse.json(body, corsResponseInit(req, init))
-}
-
-async function timingSafeEqual(a: string, b: string): Promise<boolean> {
-  try {
-    const enc = new TextEncoder()
-    const [ha, hb] = await Promise.all([
-      crypto.subtle.digest('SHA-256', enc.encode(a)),
-      crypto.subtle.digest('SHA-256', enc.encode(b)),
-    ])
-    if (ha.byteLength !== hb.byteLength) return false
-    const va = new Uint8Array(ha)
-    const vb = new Uint8Array(hb)
-    let diff = 0
-    for (let i = 0; i < va.length; i++) diff |= va[i] ^ vb[i]
-    return diff === 0
-  } catch {
-    // Fallback: explizit KEINEN direkten String-Vergleich, um Timing zu vermeiden.
-    return false
-  }
 }
 
 export async function OPTIONS(req: Request) {

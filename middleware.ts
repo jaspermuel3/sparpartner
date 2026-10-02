@@ -3,7 +3,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { getSupabaseUrl, getSupabaseAnonKey } from '@/lib/supabase/_sanitize'
 
-const PUBLIC_ROUTES = ['/login', '/auth/callback', '/api/auth', '/favicon.ico']
+const PUBLIC_ROUTES = ['/login', '/auth/callback', '/api/auth', '/api/leads/public', '/api/leads/meta', '/favicon.ico']
 const SALES_ROUTES_PREFIXES = ['/dashboard', '/request-lead', '/my-leads', '/callbacks', '/stats', '/settings', '/leads/']
 const ADMIN_ROUTES_PREFIXES = ['/admin']
 

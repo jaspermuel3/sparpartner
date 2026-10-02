@@ -19,6 +19,7 @@ export type PublicEnv = {
 export type ServerEnv = PublicEnv & {
   SUPABASE_SERVICE_ROLE_KEY: string
   LANDING_API_KEY?: string
+  META_LEADS_API_KEY?: string
   NODE_ENV: 'development' | 'production' | 'test'
 }
 
@@ -63,6 +64,7 @@ export function getEnv(): ServerEnv {
     NEXT_PUBLIC_SUPABASE_ANON_KEY: mustBeNonEmpty('NEXT_PUBLIC_SUPABASE_ANON_KEY', raw.NEXT_PUBLIC_SUPABASE_ANON_KEY, 20),
     SUPABASE_SERVICE_ROLE_KEY: mustBeNonEmpty('SUPABASE_SERVICE_ROLE_KEY', raw.SUPABASE_SERVICE_ROLE_KEY, 20),
     LANDING_API_KEY: raw.LANDING_API_KEY,
+    META_LEADS_API_KEY: raw.META_LEADS_API_KEY,
     NEXT_PUBLIC_DISABLE_NOTIFICATIONS: raw.NEXT_PUBLIC_DISABLE_NOTIFICATIONS,
   }
   _env = parsed
@@ -76,6 +78,8 @@ export const getSupabaseAnonKey = (): string => getEnv().NEXT_PUBLIC_SUPABASE_AN
 export const getSupabaseServiceRoleKey = (): string => getEnv().SUPABASE_SERVICE_ROLE_KEY
 export const getLandingApiKey = (): string =>
   mustBeNonEmpty('LANDING_API_KEY', getEnv().LANDING_API_KEY, 32)
+export const getMetaLeadsApiKey = (): string =>
+  mustBeNonEmpty('META_LEADS_API_KEY', getEnv().META_LEADS_API_KEY, 32)
 export const getNodeEnv = (): ServerEnv['NODE_ENV'] => getEnv().NODE_ENV
 export const isProd = (): boolean => getNodeEnv() === 'production'
 export const isDev = (): boolean => getNodeEnv() === 'development'
