@@ -49,8 +49,12 @@ BEGIN
       );
 
       -- public.users Eintrag anlegen
+      -- WICHTIG: Spalte users.role hat Typ public.user_role (ENUM),
+      -- also muss der Text-String v_role per ::public.user_role gecastet
+      -- werden. Sonst Fehler 42804: column "role" is of type user_role
+      -- but expression is of type text.
       INSERT INTO public.users (id, full_name, role, is_active, created_at, updated_at)
-      VALUES (v_auth.id, v_name, v_role, TRUE, COALESCE(v_auth.created_at, NOW()), NOW())
+      VALUES (v_auth.id, v_name, v_role::public.user_role, TRUE, COALESCE(v_auth.created_at, NOW()), NOW())
       ON CONFLICT (id) DO NOTHING;
 
       RAISE NOTICE '✅ Angelegt: public.users id=% email=% role=%',
@@ -63,8 +67,11 @@ BEGIN
     -- (2) Falls User existiert, aber is_active = FALSE oder role=NULL, reparieren:
     UPDATE public.users u SET
       is_active = TRUE,
-      role      = COALESCE(NULLIF(u.role, ''),
-                    CASE WHEN v_auth.email ILIKE '%admin%' THEN 'admin' ELSE 'seller' END),
+      role      = COALESCE(u.role,
+                    CASE WHEN v_auth.email ILIKE '%admin%'
+                      THEN 'admin'::public.user_role
+                      ELSE 'seller'::public.user_role
+                    END),
       full_name = COALESCE(NULLIF(u.full_name, ''),
                     COALESCE(v_auth.raw_user_meta_data->>'full_name',
                              v_auth.raw_user_meta_data->>'name',

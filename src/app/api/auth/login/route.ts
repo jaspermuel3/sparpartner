@@ -108,19 +108,56 @@ export async function POST(request: NextRequest) {
         (authUser.email ? authUser.email.split('@')[0] : 'Benutzer')
 
       try {
-        const { data: created, error: createErr } = await admin
-          .from('users')
-          .insert({
-            id: authUser.id,
-            full_name: fallbackFullName,
-            role: fallbackRole,
-            is_active: true,
-          })
-          .select('id, role, is_active, last_login_at, full_name')
-          .limit(1)
-          .maybeSingle()
+        // Versuch 1: Direktes Insert via Supabase JS
+        let inserted = false
+        try {
+          const { data: created, error: createErr } = await admin
+            .from('users')
+            .insert({
+              id: authUser.id,
+              full_name: fallbackFullName,
+              role: fallbackRole as any,
+              is_active: true,
+            })
+            .select('id, role, is_active, last_login_at, full_name')
+            .limit(1)
+            .maybeSingle()
 
-        if (!createErr && created) dbUser = created
+          if (!createErr && created) {
+            dbUser = created
+            inserted = true
+          }
+        } catch {}
+
+        // Versuch 2: Enum-safe via RPC public.ensure_public_user_exists(...)
+        // (definiert in Migration 0016)
+        if (!inserted) {
+          try {
+            const rpc: any = await admin
+              .rpc('ensure_public_user_exists', {
+                p_auth_id: authUser.id,
+                p_fallback_name: fallbackFullName,
+                p_fallback_role: fallbackRole,
+              })
+              .limit(1)
+              .maybeSingle()
+
+            if (rpc && rpc.data) dbUser = rpc.data as any
+          } catch {}
+        }
+
+        // Versuch 3: Fallback Query – falls Reparatur-Skript parallel schon lief
+        if (!dbUser) {
+          try {
+            const { data: retry } = await admin
+              .from('users')
+              .select('id, role, is_active, last_login_at, full_name')
+              .eq('id', authUser.id)
+              .limit(1)
+              .maybeSingle()
+            if (retry) dbUser = retry
+          } catch {}
+        }
 
         try {
           await admin
