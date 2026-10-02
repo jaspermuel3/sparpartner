@@ -92,12 +92,45 @@ export async function POST(request: NextRequest) {
       return copyCookies(response, NextResponse.redirect(loginRedirect, { status: 303 }))
     }
 
-    const { data: dbUser } = await admin
+    let { data: dbUser } = await admin
       .from('users')
       .select('id, role, is_active, last_login_at, full_name')
       .eq('id', authUser.id)
       .limit(1)
       .maybeSingle()
+
+    if (!dbUser) {
+      const fallbackRole =
+        (authUser.email ?? '').toLowerCase().includes('admin') ? 'admin' : 'seller'
+      const fallbackFullName =
+        (authUser.user_metadata?.full_name as string) ||
+        (authUser.user_metadata?.name as string) ||
+        (authUser.email ? authUser.email.split('@')[0] : 'Benutzer')
+
+      try {
+        const { data: created, error: createErr } = await admin
+          .from('users')
+          .insert({
+            id: authUser.id,
+            full_name: fallbackFullName,
+            role: fallbackRole,
+            is_active: true,
+          })
+          .select('id, role, is_active, last_login_at, full_name')
+          .limit(1)
+          .maybeSingle()
+
+        if (!createErr && created) dbUser = created
+
+        try {
+          await admin
+            .from('token_wallets')
+            .insert({ user_id: authUser.id, balance: fallbackRole === 'admin' ? 100 : 0 })
+            .onConflict('user_id')
+            .ignore()
+        } catch {}
+      } catch {}
+    }
 
     if (!dbUser) {
       await supabase.auth.signOut()
